@@ -2,60 +2,120 @@
 import argparse
 import datetime
 import os
-
+import scipy.sparse as sp
+import networkx as nx
 import numpy as np
 import torch
 import torch.nn.functional as F
+from scipy.sparse import csr_matrix
+from torch_geometric.datasets import AttributedGraphDataset
+from torch_geometric.utils import add_remaining_self_loops, to_networkx
 
 from models.EmbLearner import EmbLearner
 from models.EmbLearnerWithHyper import EmbLearnerwithHyper
 from models.EmbLearnerWithWeights import EmbLearnerwithWeights
 from models.EmbLearnerWithoutHyper import EmbLearnerWithoutHyper
-from utils.load_utils import load_data
+from utils.load_utils import load_data, hypergraph_construction, loadQuerys
 from utils.log_utils import get_logger
-
-from utils.val_utils import f1_score_, NMI_score, ARI_score, JAC_score
-
+from utils.val_utils import f1_score_, NMI_score, ARI_score, JAC_score, validation
+from utils.ego_utils import *
 '''
-这个使用原文中的数据集
+使用facebook相关的数据集
 '''
-def validation(val,nodes_feats, model, edge_index, edge_index_aug):
-    scorelists = []
-    for q, comm in val:
-        h = model((q, None, edge_index, edge_index_aug, nodes_feats))
-        # 计算余弦相似度
-        sim=F.cosine_similarity(h[q].unsqueeze(0),h,dim=1) #(115,)
-        #使用 torch.sigmoid 将相似度值转换为概率，然后使用 squeeze(0) 移除多余的维度，
-        # 并将结果转移到 CPU，最后转换为 NumPy 数组并转换为 Python 列表。
-        simlists = torch.sigmoid(sim.squeeze(0)).to(
-            torch.device('cpu')).numpy().tolist()  # torch.sigmoid(simlists).numpy().tolist()
-        #将结果存储在scorelists中
-        scorelists.append([q, comm, simlists]) #记录该样本的测试结果
-    s_ = 0.1 #阈值？？
-    f1_m = 0.0 #记录最大的样本得分
-    s_m = s_ #记录可以取的最大的社区阈值
-    while(s_<=0.9): #结束循环后得到的是从0.1按照0.05的步长不断增加社区阈值可以得到的最大的平均f1值f1_m和最优的s_取值s_m。
-        f1_x = 0.0
-        # print("------------------------------", s_) #s_是什么？？
-        for q, comm, simlists in scorelists:
-            comm_find = []
-            for i, score in enumerate(simlists):#i是每个节点的编号；score是q与每个节点的相似得分。
-                if score >=s_ and i not in comm_find:
-                    comm_find.append(i)
 
-            comm_find = set(comm_find)
-            comm_find = list(comm_find)
-            comm = set(comm)
-            comm = list(comm)
-            f1, pre, rec = f1_score_(comm_find, comm)
-            f1_x= f1_x+f1 #累加此样本的f1得分
-        f1_x = f1_x/len(val) #总的f1得分除以验证集样本数量
-        if f1_m<f1_x: #如果此社区阈值下得到的平均f1得分更高
-            f1_m = f1_x
-            s_m = s_
-        s_ = s_+0.05 #将s_进行增大。
-    logger.info(f'best threshold: {s_m}, validation_set Avg F1: {f1_m}')
-    return s_m, f1_m
+
+def load_FB(args):
+    max = 0
+    edges = []
+    '''********************1. 加载图数据******************************'''
+    if args.attack == 'none':  # 使用原始数据
+        if args.dataset in ['football', 'facebook_all']: #原文中的数据集
+            path = os.path.join(args.root, args.dataset, f'{args.dataset}.txt')
+            for line in open(path, encoding='utf-8'):
+                node1, node2 = line.split(" ")
+                node1_ = int(node1)
+                node2_ = int(node2)
+                if node1_ == node2_:
+                    continue
+                if max < node1_:
+                    max = node1_
+                if max < node2_:
+                    max = node2_
+                edges.append([node1_, node2_])
+            n_nodes = max + 1
+            nodeslists = [x for x in range(n_nodes)]
+            graphx = nx.Graph()  # 学一下怎么用的。
+            graphx.add_nodes_from(nodeslists)
+            graphx.add_edges_from(edges)
+            print(graphx)
+            del edges
+        elif args.dataset.startswith(('fb', 'wfb','fa')): #读取ego-facebook的邻接矩阵
+            graphx = nx.read_edgelist(f'{args.root}/{args.dataset}/{args.dataset}.edges', nodetype=int,data=False)
+            print(graphx)
+            n_nodes = graphx.number_of_nodes()
+        else:
+            raise ValueError(f"未识别的数据集类型：{args.dataset}")  # 处理没有匹配的情况
+    elif args.attack == 'random':
+        path = os.path.join(args.root, args.dataset, args.attack, f'{args.dataset}_{args.attack}_{args.type}_{args.ptb_rate}.npz')
+        adj_csr_matrix = sp.load_npz(path)
+        graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
+        print(graphx)
+        n_nodes = graphx.number_of_nodes()
+    elif args.attack =='add': #metaGC中自己注入随机噪声
+        path = os.path.join(args.root, args.dataset, args.attack, f'{args.dataset}_{args.attack}_{args.noise_level}.npz')
+        adj_csr_matrix = sp.load_npz(path)
+        graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
+        print(graphx)
+        n_nodes = graphx.number_of_nodes()
+    else:
+        raise ValueError(f"未识别的"
+                         f"攻击类型：{args.attack}")  # 处理没有匹配的攻击类型情况
+
+    # 计算aa指标
+    aa_indices = nx.adamic_adar_index(graphx)
+    # 初始化 Adamic-Adar 矩阵
+    aa_matrix = np.zeros((n_nodes, n_nodes))
+    # 计算 Adamic-Adar 指数
+    for u, v, p in aa_indices:
+        aa_matrix[u, v] = p
+        aa_matrix[v, u] = p  # 因为是无向图，所以也需要填充对称位置
+    # 转换为张量
+    aa_tensor = torch.tensor(aa_matrix, dtype=torch.float32)
+
+    src = []
+    dst = []
+    for id1, id2 in graphx.edges:
+        src.append(id1)
+        dst.append(id2)
+        src.append(id2)
+        dst.append(id1)
+    # 这两行是获得存储成稀疏矩阵的格式，加权模型中使用
+    num_nodes = graphx.number_of_nodes()
+    adj_matrix = csr_matrix(([1] * len(src), (src, dst)), shape=(num_nodes, num_nodes))
+    # 构建超图
+    edge_index = torch.tensor([src, dst])
+    edge_index_aug, egde_attr = hypergraph_construction(edge_index, n_nodes, k=args.k)  # 构建超图
+    edge_index = add_remaining_self_loops(edge_index, num_nodes=n_nodes)[0]
+
+    '3.*************加载特征数据************'
+    if args.dataset.startswith(('fb', 'wfb','fa')): #不加入中心节点
+        # feature_file = "{}/{}/{}.feat".format(args.root, args.dataset, args.dataset)
+        # feats_array = load_features(feature_file)
+        feats_array = np.loadtxt(f'{args.root}/{args.dataset}/{args.dataset}.feat',delimiter=' ', dtype=np.float32)
+        print(type(feats_array))
+        nodes_feats = fnormalize(feats_array)  # 将特征进行归一化
+        nodes_feats = torch.from_numpy(feats_array)
+        node_in_dim = nodes_feats.shape[1]
+    elif args.dataset in ['facebook']: #读取pyg中的特征数据
+        feats_array = np.loadtxt(f'{args.root}/{args.dataset}/{args.dataset}.feat', dtype=float, delimiter=' ')
+        nodes_feats = torch.tensor(feats_array, dtype=torch.float32)
+        node_in_dim = nodes_feats.shape[1]
+
+    '''2:************************加载训练数据**************************'''
+    train, val, test = loadQuerys(args.dataset, args.root, args.train_size, args.val_size, args.test_size,
+                                  args.train_path, args.test_path, args.val_path)
+
+    return nodes_feats, train, val, test, node_in_dim, n_nodes, edge_index, edge_index_aug, adj_matrix, aa_tensor
 
 def Community_Search(args,logger):
 
@@ -64,9 +124,7 @@ def Community_Search(args,logger):
     logger.info(f'device: {device}')
 
     #加载数据并移动到device
-    nodes_feats, train, val, test, node_in_dim, n_nodes, edge_index, edge_index_aug, adj_matrix, aa_th = load_data(args)
-    # print("edge_index dtype:", edge_index.dtype)
-    # print("feats dtype:", nodes_feats.dtype)
+    nodes_feats, train, val, test, node_in_dim, n_nodes, edge_index, edge_index_aug, adj_matrix, aa_th = load_FB(args)
 
     logger.info(f'load_time = {datetime.datetime.now() - preprocess_start}, train len = {len(train)}')
     nodes_feats = nodes_feats.to(device)
@@ -126,13 +184,13 @@ def Community_Search(args,logger):
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
     if args.attack == 'meta':
-        model_path = f'{model_dir}{args.dataset_name}_{args.attack}_{args.ptb_rate}_cs.pkl'
+        model_path = f'{model_dir}{args.dataset}_{args.attack}_{args.ptb_rate}_cs.pkl'
     elif args.attack == 'random':
-        model_path = f'{model_dir}{args.dataset_name}_{args.attack}_{args.type}_{args.ptb_rate}_cs.pkl'
+        model_path = f'{model_dir}{args.dataset}_{args.attack}_{args.type}_{args.ptb_rate}_cs.pkl'
     elif args.attack =='add':
-        model_path = f'{model_dir}{args.dataset_name}_{args.attack}_{args.noise_level}_cs.pkl'
+        model_path = f'{model_dir}{args.dataset}_{args.attack}_{args.noise_level}_cs.pkl'
     else:
-        model_path = args.res_root + args.dataset_name + '_res.txt'
+        model_path = args.res_root + args.dataset + '_res.txt'
 
     torch.save(embLearner.state_dict(), model_path)  #存储训练好的模型
 
@@ -155,7 +213,8 @@ def Community_Search(args,logger):
     with torch.no_grad():
         #使用验证集数据找打最佳阈值s_
         s_, f1_ = validation(val, nodes_feats, embLearner, edge_index, edge_index_aug)
-        logger.info(f'evaluation time = {datetime.datetime.now() - eval_start}, best s_={s_}, best val f1_={f1_}')
+        logger.info(f'evaluation time = {datetime.datetime.now() - eval_start}, best threshold s_={s_}, best val f1_={f1_}')
+
         #开始测试
         logger.info(f'#################### starting test  ####################')
         for q,comm in test:
@@ -204,13 +263,13 @@ def Community_Search(args,logger):
 
     # 存储测试结果
     if args.attack == 'meta':
-        output = args.res_root + args.dataset_name + f'_{args.attack}_{args.ptb_rate}_res.txt'
+        output = args.res_root + args.dataset + f'_{args.attack}_{args.ptb_rate}_res.txt'
     elif args.attack == 'random':
-        output = args.res_root + args.dataset_name + f'_{args.attack}_{args.type}_{args.ptb_rate}_res.txt'
+        output = args.res_root + args.dataset + f'_{args.attack}_{args.type}_{args.ptb_rate}_res.txt'
     elif args.attack =='add':
-        output = args.res_root + args.dataset_name + f'_{args.attack}_{args.noise_level}_res.txt'
+        output = args.res_root + args.dataset + f'_{args.attack}_{args.noise_level}_res.txt'
     else:
-        output = args.res_root + args.dataset_name + '_res.txt'
+        output = args.res_root + args.dataset + '_res.txt'
     with open(output, 'a+') as fh:
         current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         line = (

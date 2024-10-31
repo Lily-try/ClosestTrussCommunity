@@ -3,21 +3,26 @@ import argparse
 import datetime
 import os
 
+import networkx as nx
+import scipy.sparse as sp
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torch_geometric.utils import add_remaining_self_loops
 
+from scipy.sparse import csr_matrix
+
+from utils.citation_loader import citation_graph_reader,citation_target_reader,citation_feature_reader
 from models.EmbLearner import EmbLearner
 from models.EmbLearnerWithHyper import EmbLearnerwithHyper
 from models.EmbLearnerWithWeights import EmbLearnerwithWeights
 from models.EmbLearnerWithoutHyper import EmbLearnerWithoutHyper
-from utils.load_utils import load_data
+from utils.load_utils import load_data, hypergraph_construction, loadQuerys
 from utils.log_utils import get_logger
-
 from utils.val_utils import f1_score_, NMI_score, ARI_score, JAC_score
 
 '''
-这个使用原文中的数据集
+使用引文网络相关的数据集
 '''
 def validation(val,nodes_feats, model, edge_index, edge_index_aug):
     scorelists = []
@@ -57,6 +62,68 @@ def validation(val,nodes_feats, model, edge_index, edge_index_aug):
     logger.info(f'best threshold: {s_m}, validation_set Avg F1: {f1_m}')
     return s_m, f1_m
 
+def load_citations(args):
+    '''********************1. 加载图数据******************************'''
+    if args.attack == 'none':  # 使用原始数据
+        if args.dataset in ['cora', 'pubmed', 'citeseer']:
+            graphx = citation_graph_reader(args.root, args.dataset)  # 读取图 nx格式的
+            print(graphx)
+            n_nodes = graphx.number_of_nodes()
+    elif args.attack == 'random':
+        path = os.path.join(args.root, args.dataset, args.attack,
+                            f'{args.dataset}_{args.attack}_{args.type}_{args.ptb_rate}.npz')
+        adj_csr_matrix = sp.load_npz(path)
+        graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
+        print(graphx)
+        n_nodes = graphx.number_of_nodes()
+    elif args.attack =='add': #metaGC中自己注入随机噪声
+        path = os.path.join(args.root, args.dataset, args.attack,
+                            f'{args.dataset}_{args.attack}_{args.noise_level}.npz')
+        adj_csr_matrix = sp.load_npz(path)
+        graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
+        print(graphx)
+        n_nodes = graphx.number_of_nodes()
+
+    # 计算aa指标
+    aa_indices = nx.adamic_adar_index(graphx)
+    # 初始化 Adamic-Adar 矩阵
+    aa_matrix = np.zeros((n_nodes, n_nodes))
+    # 计算 Adamic-Adar 指数
+    for u, v, p in aa_indices:
+        aa_matrix[u, v] = p
+        aa_matrix[v, u] = p  # 因为是无向图，所以也需要填充对称位置
+    # 转换为张量
+    aa_tensor = torch.tensor(aa_matrix, dtype=torch.float32)
+
+    src = []
+    dst = []
+    for id1, id2 in graphx.edges:
+        src.append(id1)
+        dst.append(id2)
+        src.append(id2)
+        dst.append(id1)
+    # 这两行是获得存储成稀疏矩阵的格式，加权模型中使用
+    num_nodes = graphx.number_of_nodes()
+    adj_matrix = csr_matrix(([1] * len(src), (src, dst)), shape=(num_nodes, num_nodes))
+    # 构建超图
+    edge_index = torch.tensor([src, dst])
+    edge_index_aug, egde_attr = hypergraph_construction(edge_index, n_nodes, k=args.k)  # 构建超图
+    edge_index = add_remaining_self_loops(edge_index, num_nodes=n_nodes)[0]
+
+    '''2:************************加载训练数据**************************'''
+    train, val, test = loadQuerys(args.dataset, args.root, args.train_size, args.val_size, args.test_size,
+                                  args.train_path, args.test_path, args.val_path)
+
+    '3.*************加载特征数据************'
+    if args.dataset in ['cora', 'pubmed','citeseer']:
+        nodes_feats = citation_feature_reader(args.root, args.dataset)  # numpy.ndaaray:(2708,1433)
+        nodes_feats = torch.from_numpy(nodes_feats)  # 转换成tensor
+        node_in_dim = nodes_feats.shape[1]
+        print(f'{args.dataset}的feats dtype: {nodes_feats.dtype}')
+    return nodes_feats, train, val, test, node_in_dim, n_nodes, edge_index, edge_index_aug, adj_matrix, aa_tensor
+
+
+
 def Community_Search(args,logger):
 
     preprocess_start = datetime.datetime.now()
@@ -64,9 +131,7 @@ def Community_Search(args,logger):
     logger.info(f'device: {device}')
 
     #加载数据并移动到device
-    nodes_feats, train, val, test, node_in_dim, n_nodes, edge_index, edge_index_aug, adj_matrix, aa_th = load_data(args)
-    # print("edge_index dtype:", edge_index.dtype)
-    # print("feats dtype:", nodes_feats.dtype)
+    nodes_feats, train, val, test, node_in_dim, n_nodes, edge_index, edge_index_aug, adj_matrix, aa_th = load_citations(args)
 
     logger.info(f'load_time = {datetime.datetime.now() - preprocess_start}, train len = {len(train)}')
     nodes_feats = nodes_feats.to(device)
@@ -126,13 +191,13 @@ def Community_Search(args,logger):
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
     if args.attack == 'meta':
-        model_path = f'{model_dir}{args.dataset_name}_{args.attack}_{args.ptb_rate}_cs.pkl'
+        model_path = f'{model_dir}{args.dataset}_{args.attack}_{args.ptb_rate}_cs.pkl'
     elif args.attack == 'random':
-        model_path = f'{model_dir}{args.dataset_name}_{args.attack}_{args.type}_{args.ptb_rate}_cs.pkl'
+        model_path = f'{model_dir}{args.dataset}_{args.attack}_{args.type}_{args.ptb_rate}_cs.pkl'
     elif args.attack =='add':
-        model_path = f'{model_dir}{args.dataset_name}_{args.attack}_{args.noise_level}_cs.pkl'
+        model_path = f'{model_dir}{args.dataset}_{args.attack}_{args.noise_level}_cs.pkl'
     else:
-        model_path = args.res_root + args.dataset_name + '_res.txt'
+        model_path = args.res_root + args.dataset + '_res.txt'
 
     torch.save(embLearner.state_dict(), model_path)  #存储训练好的模型
 
@@ -204,13 +269,13 @@ def Community_Search(args,logger):
 
     # 存储测试结果
     if args.attack == 'meta':
-        output = args.res_root + args.dataset_name + f'_{args.attack}_{args.ptb_rate}_res.txt'
+        output = args.res_root + args.dataset + f'_{args.attack}_{args.ptb_rate}_res.txt'
     elif args.attack == 'random':
-        output = args.res_root + args.dataset_name + f'_{args.attack}_{args.type}_{args.ptb_rate}_res.txt'
+        output = args.res_root + args.dataset + f'_{args.attack}_{args.type}_{args.ptb_rate}_res.txt'
     elif args.attack =='add':
-        output = args.res_root + args.dataset_name + f'_{args.attack}_{args.noise_level}_res.txt'
+        output = args.res_root + args.dataset + f'_{args.attack}_{args.noise_level}_res.txt'
     else:
-        output = args.res_root + args.dataset_name + '_res.txt'
+        output = args.res_root + args.dataset + '_res.txt'
     with open(output, 'a+') as fh:
         current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         line = (

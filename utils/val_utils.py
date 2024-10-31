@@ -1,6 +1,8 @@
 import numpy as np
+import torch
 from sklearn.metrics import normalized_mutual_info_score, adjusted_rand_score, jaccard_score
-
+import torch.nn.functional as F
+from utils.log_utils import get_logger
 '''
 评价社区搜索效果的指标
 '''
@@ -51,3 +53,40 @@ def JAC_score(comm_find, comm, n_nodes):
     score = jaccard_score(truthlabel, prelabel)
     #print("q, jac:", score)
     return score
+
+def validation(val,nodes_feats, model, edge_index, edge_index_aug):
+    scorelists = []
+    for q, comm in val:
+        h = model((q, None, edge_index, edge_index_aug, nodes_feats))
+        # 计算余弦相似度
+        sim=F.cosine_similarity(h[q].unsqueeze(0),h,dim=1) #(115,)
+        #使用 torch.sigmoid 将相似度值转换为概率，然后使用 squeeze(0) 移除多余的维度，
+        # 并将结果转移到 CPU，最后转换为 NumPy 数组并转换为 Python 列表。
+        simlists = torch.sigmoid(sim.squeeze(0)).to(
+            torch.device('cpu')).numpy().tolist()  # torch.sigmoid(simlists).numpy().tolist()
+        #将结果存储在scorelists中
+        scorelists.append([q, comm, simlists]) #记录该样本的测试结果
+    s_ = 0.1 #阈值？？
+    f1_m = 0.0 #记录最大的样本得分
+    s_m = s_ #记录可以取的最大的社区阈值
+    while(s_<=0.9): #结束循环后得到的是从0.1按照0.05的步长不断增加社区阈值可以得到的最大的平均f1值f1_m和最优的s_取值s_m。
+        f1_x = 0.0
+        # print("------------------------------", s_) #s_是什么？？
+        for q, comm, simlists in scorelists:
+            comm_find = []
+            for i, score in enumerate(simlists):#i是每个节点的编号；score是q与每个节点的相似得分。
+                if score >=s_ and i not in comm_find:
+                    comm_find.append(i)
+
+            comm_find = set(comm_find)
+            comm_find = list(comm_find)
+            comm = set(comm)
+            comm = list(comm)
+            f1, pre, rec = f1_score_(comm_find, comm)
+            f1_x= f1_x+f1 #累加此样本的f1得分
+        f1_x = f1_x/len(val) #总的f1得分除以验证集样本数量
+        if f1_m<f1_x: #如果此社区阈值下得到的平均f1得分更高
+            f1_m = f1_x
+            s_m = s_
+        s_ = s_+0.05 #将s_进行增大。
+    return s_m, f1_m

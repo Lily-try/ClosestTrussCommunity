@@ -4,11 +4,15 @@ import scipy.sparse as sp
 import numpy as np
 import torch
 from scipy.sparse import csr_matrix
+from torch_geometric.datasets import AttributedGraphDataset
 from torch_geometric.utils import remove_self_loops, add_remaining_self_loops
 from torch_sparse import spspmm, coalesce
 from torch_geometric.data import Data
-from utils import citation_utils
 
+from utils.citation_loader import citation_graph_reader,citation_feature_reader
+from utils import citation_loader
+# from utils import efacebook_utils
+from utils import ego_utils
 '''
 加载社区搜索所需的图、特征矩阵、训练、验证、测试集
 '''
@@ -127,8 +131,8 @@ def load_data(args):
     max = 0
     edges = []
     if args.attack == 'none':  # 使用原始数据
-        if args.dataset == 'football':
-            path = os.path.join(args.root, args.dataset, f'{args.dataset}.txt')
+        if args.dataset_name in ['football', 'facebook_all']:
+            path = os.path.join(args.root_name, args.dataset_name, f'{args.dataset_name}.txt')
             for line in open(path, encoding='utf-8'):
                 node1, node2 = line.split(" ")
                 node1_ = int(node1)
@@ -147,22 +151,36 @@ def load_data(args):
             graphx.add_edges_from(edges)
             print(graphx)
             del edges
-        elif args.dataset in ['cora', 'pubmed', 'citeseer']:
-            graphx = citation_utils.citation_graph_reader(args.root, args.dataset)  # 读取图 nx格式的
+        elif args.dataset_name in ['cora', 'pubmed', 'citeseer']:
+            graphx = citation_graph_reader(args.root_name, args.dataset_name)  # 读取图 nx格式的
             print(graphx)
+            n_nodes = graphx.number_of_nodes()
+        elif args.dataset_name.startswith('fb'): #读取ego-facebook的邻接矩阵
+            graphx = ego_utils.ego_graph_reader(args.root_name, args.dataset_name)
+            # graph_path = f'{args.root}/{args.dataset}/{args.dataset[2:]}.edges'
+            # graphx = efacebook_utils.read_edge_file(graph_path)
+            print(graphx)
+            n_nodes = graphx.number_of_nodes()
+        elif args.dataset_name in ['facebook']: #从pyg上读取的facebook数据
+            dataset = AttributedGraphDataset(root='../data', name='facebook')
+            data = dataset[0]
+            #存在错误呢
+        elif args.dataset_name.startswith('wfb'):
+            edges_path = "{}/{}/{}.edges".format(args.root_name, args.dataset_name, args.dataset_name)
+            graphx = nx.read_edgelist(edges_path, nodetype=int)
             n_nodes = graphx.number_of_nodes()
     elif args.attack == 'random':
         # 读取npz版本的。
-        path = os.path.join(args.root, args.dataset, args.attack,
-                            f'{args.dataset}_{args.attack}_{args.type}_{args.ptb_rate}.npz')
+        path = os.path.join(args.root_name, args.dataset_name, args.attack,
+                            f'{args.dataset_name}_{args.attack}_{args.type}_{args.ptb_rate}.npz')
         adj_csr_matrix = sp.load_npz(path)
         graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
         print(graphx)
         n_nodes = graphx.number_of_nodes()
     elif args.attack =='add': #metaGC中自己注入随机噪声
         # 读取npz版本的。
-        path = os.path.join(args.root, args.dataset, args.attack,
-                            f'{args.dataset}_{args.attack}_{args.noise_level}.npz')
+        path = os.path.join(args.root_name, args.dataset_name, args.attack,
+                            f'{args.dataset_name}_{args.attack}_{args.noise_level}.npz')
         adj_csr_matrix = sp.load_npz(path)
         graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
         print(graphx)
@@ -195,12 +213,12 @@ def load_data(args):
     edge_index = add_remaining_self_loops(edge_index, num_nodes=n_nodes)[0]
 
     '''2:************************加载训练数据**************************'''
-    train, val, test = loadQuerys(args.dataset, args.root, args.train_size, args.val_size, args.test_size,
+    train, val, test = loadQuerys(args.dataset_name, args.root_name, args.train_size, args.val_size, args.test_size,
                                   args.train_path, args.test_path, args.val_path)
 
     '3.*************加载特征数据************'
-    if args.dataset in ['football']:
-        path_feat = os.path.join(args.root, args.dataset, f'{args.dataset}_{args.feats_path}')
+    if args.dataset_name in ['football', 'facebook_all']:
+        path_feat = os.path.join(args.root_name, args.dataset_name, f'{args.dataset_name}_feats.txt')
         if not os.path.isfile(path_feat):
             raise Exception("No such file: %s" % path_feat)
         feats_node = {}
@@ -222,9 +240,22 @@ def load_data(args):
             else:
                 nodes_feats.append(feats_node[i])
         nodes_feats = torch.tensor(nodes_feats)
-    elif args.dataset in ['cora', 'pubmed']:
-        nodes_feats = citation_utils.citation_feature_reader(args.root, args.dataset)  # numpy.ndaaray:(2708,1433)
+        print(f"{args.dataset_name} feats dtype:", nodes_feats.dtype)
+
+    elif args.dataset_name in ['cora', 'pubmed']:
+        nodes_feats = citation_feature_reader(args.root_name, args.dataset_name)  # numpy.ndaaray:(2708,1433)
         nodes_feats = torch.from_numpy(nodes_feats)  # 转换成tensor
+        node_in_dim = nodes_feats.shape[1]
+    elif args.dataset_name.startswith('fb'): #读取ego facebook的特征数据
+        nodes_feats = ego_utils.ego_feature_reader(args.root_name, args.dataset_name)
+        nodes_feats = ego_utils.fnormalize(nodes_feats) #将特征进行归一化
+        nodes_feats = torch.from_numpy(nodes_feats)  # 转换成tensor
+        nodes_feats = nodes_feats.to(torch.float32) # 转换成float32,确保和模型一致
+        node_in_dim = nodes_feats.shape[1]
+    elif args.dataset_name.startswith('wfb'):
+        feature_file = "{}/{}/{}.feat".format(args.root_name, args.dataset_name, args.dataset_name)
+        feats_array = ego_utils.load_features(feature_file)
+        nodes_feats = torch.tensor(feats_array, dtype=torch.float32)
         node_in_dim = nodes_feats.shape[1]
 
     return nodes_feats, train, val, test, node_in_dim, n_nodes, edge_index, edge_index_aug, adj_matrix, aa_tensor

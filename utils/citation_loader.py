@@ -5,8 +5,10 @@ import sys
 import networkx as nx
 import pickle as pkl
 
+from torch_geometric.datasets import Planetoid
+
 '''
-读取引文网络的graph，features，labels数据
+读取引文网络（Cora，citeseer，pubmed）的graph，features，labels数据
 将labels 按照gt_community的格式写入文件
 引文网络数据来源：
 '''
@@ -77,12 +79,10 @@ def citation_feature_reader(root,dataset_str, compression=0):
         tx_extended[test_idx_range - min(test_idx_range), :] = tx
         tx = tx_extended
 
-
-
     features = sp.vstack((allx, tx)).tolil() #lil_matrix:(2708,1433)
     features[test_idx_reorder, :] = features[test_idx_range, :]
     preprocess_features(features)
-    features = features.tocoo() #coo_matrix:(2708,1433)
+    features = features.tocoo().astype(np.float32) #coo_matrix:(2708,1433)
     features = features.toarray() #ndarray:(2708,1433)
 
     feature_list = []
@@ -164,3 +164,24 @@ def write_labels_to_file(root, dataset, labels):
                 f.write(f"{node_id} ")
             else :
                 f.write(f"{node_id} ")
+
+
+
+
+if __name__ == '__main__':
+    root_name = '../data'
+    dataset_name ='pubmed'
+
+    # 指定数据集名称和存储路径
+    dataset = Planetoid(root=root_name, name=dataset_name)
+    data = dataset[0]
+    print(data.num_nodes)
+    print(data.num_edges)
+    print(data.x.shape)
+    print(data.y.shape)
+    print(data.edge_index.shape)
+
+
+    labels = citation_target_reader(root_name,dataset_name)
+
+    write_labels_to_file(root_name, dataset_name, labels)
