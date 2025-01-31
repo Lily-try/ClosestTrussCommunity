@@ -25,6 +25,19 @@ def f1_score_(comm_find, comm):
     #ACC= (TP+TN)/(TP+TN+FP+FN)
     f1 = 2 * pre * rec / (pre + rec) # F1=2*P*R/(P+R)
     return f1, pre, rec
+def cal_pre(comm_find, comm):
+    '''
+
+    :param comm_find:TP+FP， 所有预测为正（是社区成员的元素集合），
+    :param comm: 实际的社区成员集合
+    :return:
+    '''
+
+    lists = [x for x in comm_find if x in comm] #TP（将正类预测为正类）交集，同时在com_find和comm中出现的元素。
+    if len(lists) == 0:
+        return 0.0
+    pre = len(lists) * 1.0 / len(comm_find) #pre = TP/(TP+FP) = TP/comm_find
+    return pre
 
 def NMI_score(comm_find, comm, n_nodes):
 
@@ -93,20 +106,6 @@ def validation(val,nodes_feats, model, edge_index, edge_index_aug):
         s_ = s_+0.05 #将s_进行增大。
     return s_m, f1_m
 
-def cal_pre(comm_find, comm):
-    '''
-
-    :param comm_find:TP+FP， 所有预测为正（是社区成员的元素集合），
-    :param comm: 实际的社区成员集合
-    :return:
-    '''
-
-    lists = [x for x in comm_find if x in comm] #TP（将正类预测为正类）交集，同时在com_find和comm中出现的元素。
-    if len(lists) == 0:
-        return 0.0
-    pre = len(lists) * 1.0 / len(comm_find) #pre = TP/(TP+FP) = TP/comm_find
-    return pre
-
 def get_res_path(resroot,args):
     '''
     根据args创建需要的结果路径
@@ -114,15 +113,15 @@ def get_res_path(resroot,args):
     :return:
     '''
     if args.attack == 'meta':
-        return f'{resroot}{args.dataset}/{args.dataset}_{args.aug}_{args.attack}_{args.ptb_rate}_{args.method}_res.txt'
+        return f'{resroot}{args.dataset}/{args.dataset}_{args.attack}_{args.ptb_rate}_{args.method}_res.txt'
     elif args.attack == 'random':
-        return f'{resroot}{args.dataset}/{args.dataset}_{args.aug}_{args.attack}_{args.type}_{args.ptb_rate}_{args.method}_res.txt'
+        return f'{resroot}{args.dataset}/{args.dataset}_{args.attack}_{args.type}_{args.ptb_rate}_{args.method}_res.txt'
     # elif args.attack =='add':
     #     return f'{resroot}{args.dataset}_{args.aug}_{args.attack}_{args.noise_level}_{args.method}_res.txt'
-    elif args.attack in  ['del','gflipm','gdelm','add','gaddm']:
-        return f'{resroot}{args.dataset}/{args.dataset}_{args.aug}_{args.attack}_{args.ptb_rate}_{args.method}_res.txt'
+    elif args.attack in  ['del','gflipm','gdelm','add']:
+        return f'{resroot}{args.dataset}/{args.dataset}_{args.attack}_{args.ptb_rate}_{args.method}_res.txt'
     else:
-        return f'{resroot}{args.dataset}/{args.dataset}_{args.aug}_{args.method}_res.txt'
+        return f'{resroot}{args.dataset}/{args.dataset}_{args.method}_res.txt'
 
 def get_model_path(model_dir,args):
     '''
@@ -133,12 +132,12 @@ def get_model_path(model_dir,args):
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
     if args.attack == 'meta':
-        return f'{model_dir}{args.dataset}/{args.dataset}_{args.aug}_{args.attack}_{args.ptb_rate}_{args.method}'
+        return f'{model_dir}{args.dataset}/{args.dataset}_{args.attack}_{args.ptb_rate}_{args.method}'
     elif args.attack == 'random': #random attack
-        return f'{model_dir}{args.dataset}/{args.dataset}_{args.aug}_{args.attack}_{args.type}_{args.ptb_rate}_{args.method}'
+        return f'{model_dir}{args.dataset}/{args.dataset}_{args.attack}_{args.type}_{args.ptb_rate}_{args.method}'
     # elif args.attack =='add': #noisy graph
     #     return f'{model_dir}{args.dataset}_{args.attack}_{args.noise_level}_{args.method}.pkl'
     elif args.attack in  ['del','gflipm','gdelm','add','gaddm']: #incomplete graph
-        return f'{model_dir}{args.dataset}/{args.dataset}_{args.aug}_{args.attack}_{args.ptb_rate}_{args.method}'
+        return f'{model_dir}{args.dataset}/{args.dataset}_{args.attack}_{args.ptb_rate}_{args.method}'
     else: #不要攻击
-        return f'{model_dir}{args.dataset}/{args.dataset}_{args.aug}_{args.method}'
+        return f'{model_dir}{args.dataset}/{args.dataset}_{args.method}'

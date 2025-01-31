@@ -1,4 +1,3 @@
-'''统计攻击前后图的变化'''
 import argparse
 import os
 import sys
@@ -9,6 +8,12 @@ import scipy.sparse as sp
 from scipy.sparse import csgraph
 from scipy.linalg import eigh
 
+
+'''
+统计攻击前后图的变化
+用于测试攻击是否确实使得图中的某些性质发生了变化。
+
+'''
 
 def get_graph_properties(graphx):
     """

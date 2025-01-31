@@ -79,9 +79,9 @@ def read_community_data(root,dataset):
     :return: 一个字典，键是社区标签，值是该社区的节点列表。
     """
     communities = {}
-    print(os.path.join(root,dataset,f'{dataset}_comms.txt'))
-
-    with open(os.path.join(root,dataset,f'{dataset}_comms.txt'), 'r',encoding='utf-8') as f:
+    # print(os.path.join(root,dataset,f'{dataset}_comms.txt'))
+    file_path = os.path.join(root,dataset,f'{dataset}.comms')
+    with open(file_path, 'r',encoding='utf-8') as f:
         # 跳过第一行的标签列表
         next(f)
         label = 0
@@ -129,6 +129,20 @@ def write_queries_to_file(queries, file_path):
                 q_str = str(q)
                 comm_str = ' '.join(map(str, comm))
                 f.write(f"{q_str},{comm_str}\n")
+
+def write_onlynodes_to_file(queries, file_path):
+    """
+    将生成好的查询任务写入文件。根据文件路径区分，测试集和验证集只写入 q 和 comm。
+    :param queries: 包含查询任务的列表，每个任务是 (q, pos, comm)。
+    :param file_path: 要写入的文件路径。
+    """
+    with open(file_path, 'w') as f:
+            for q, _, comm in queries:
+                q_str = str(q)
+                comm_str = ' '.join(map(str, comm))
+                f.write(f"{q_str}\n")
+
+
 def split_and_write_queries(queries, root,dataset, split_ratios=(150, 100, 100)):
     """
     将已经生成的所有查询任务划分为训练集、验证集和测试集，并分别写入文件。
@@ -456,22 +470,29 @@ def gen_queries_and_split_with_ratio(root, dataset, nq=350, pos_ratio=0.15, thre
     print("Validation Queries:", validation_queries[:5])  # 打印前5个验证查询任务作为示例
     print("Test Queries:", test_queries[:5])  # 打印前5个测试查询任务作为示例
 
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--root',type=str, default='../data',help='dataset root path')
-    parser.add_argument('--dataset', type=str, default='pubmed', help='dataset name',choices=['cora', 'citeseer', 'pubmed','football','facebook','facebook_all','fb107','fb686','fb348','fb414','fb1684','wfb107'])
+    parser.add_argument('--dataset', type=str, default='cocs', help='dataset name',choices=['cora', 'citeseer', 'pubmed','cocs','football','facebook','facebook_all','fb107','fb686','fb348','fb414','fb1684','wfb107'])
+    #nq = train_size+val_size+test_size
     parser.add_argument('--nq',type=int,default=900,help='number of queries')
     parser.add_argument('--train_size',type=int,default=300,help='size of train set')
     parser.add_argument('--val_size',type=int,default=100,help='size of validation set')
     parser.add_argument('--test_size',type=int,default=500,help='size of test set')
+    parser.add_argument('--type',type=str,default='num',choices=['ratio','range','dis','num'],help='ways to gen query')
+    #if type = range
     parser.add_argument('--np_min',type=int,default=5,help='min number of queries，egofb:3; citations or facebook_all:5; ')   #如果是ego-facebook数据集，将这个参数设置为3。5太大了
     parser.add_argument('--np_max',type=int,default=30,help='max number of queries, egofb:10;citations or facebook_all:30; ')  #如果是ego-facebook数据集，将这个参数设置为10，30太大了。
-    parser.add_argument('--type',type=str,default='range',choices=['ratio','range','dis'],help='ways to gen query')
+    parser.add_argument('--num',type=int,default=3,help='number of pos nodes') #if type =num
+    #if type = ratio
     parser.add_argument('--pos_ratio',type=float,default=0.2,help='ratio of positive samples within each query task') #type=ratio时，pos相对于gt_comm的比例
+    #if type = dis 考虑生成的训练节点的位置
+    parser.add_argument('--min_distance', type=int, default=3, help='each query node min distance')  # type=dis
+    #是否限制任务之间的不重复，默认是true
     parser.add_argument('--constrain',type=str,default='True',help='constrain queries') #是否要限制不重复
     parser.add_argument('--threshold', type=float, default=0.8, help='if constrain ==True, consider queries repeat num threshold') #constrain=True时，限制的比例
-    parser.add_argument('--min_distance',type=int,default=3,help='each query node min distance') #type=dis
     args = parser.parse_args()
 
     split_ratios = (args.train_size, args.val_size, args.test_size)
@@ -524,6 +545,18 @@ if __name__ == '__main__':
         train_path = os.path.join(dataset_root, f'{args.dataset}_pos_train_{split_ratios[0]}.txt')
         val_path = os.path.join(dataset_root, f'{args.dataset}_val_{split_ratios[1]}.txt')
         test_path = os.path.join(dataset_root, f'{args.dataset}_test_{split_ratios[2]}.txt')
+    elif args.type == 'num':
+        gen_all_queries(args.root, args.dataset, communities, args.nq, args.num, args.num, args.threshold,args.constrain)  # 生成并存储全部的查询任务
+        # 5.读取生成的所有查询任务
+        queries = read_queries_from_file(f'{args.root}/{args.dataset}/{args.dataset}_all_queries.txt')  # 读取查询任务
+        # 6. 将查询任务划分并写入文件。
+        dataset_root = os.path.join(args.root, args.dataset)
+        train_path = os.path.join(dataset_root, f'{args.dataset}_{args.num}_train_{split_ratios[0]}.txt')
+        val_path = os.path.join(dataset_root, f'{args.dataset}_{args.num}_val_{split_ratios[1]}.txt')
+        test_path = os.path.join(dataset_root, f'{args.dataset}_{args.num}_test_{split_ratios[2]}.txt')
+    elif args.type == 'trans': #选取部分社区用于生成查询
+        pass
+
 
     #进行数据划分
     train_size, val_size, test_size = split_ratios
@@ -539,6 +572,12 @@ if __name__ == '__main__':
     write_queries_to_file(validation_queries, val_path)
     # 写入测试集文件
     write_queries_to_file(test_queries, test_path)
+    #只写入测试集的查询节点（用于传统方法）
+    query_path = os.path.join(args.root, args.dataset, f'{args.dataset}_querynode.txt')
+    print(f'File will be saved at: {query_path}')  # 打印路径
+    write_onlynodes_to_file(test_queries,query_path)
+
+
 
     print('————————测  试——————————————————')
     train_queries = read_queries_from_file(train_path)

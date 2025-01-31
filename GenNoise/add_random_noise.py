@@ -7,19 +7,54 @@ import os
 # from utils import txt_utils, citation_utils, snap_utils
 from preprocess import txt_utils
 from utils import citation_loader
+'''
+随机插入跨标签的边
+metaGC中自己注入随机噪声
+'''
 
-def add_noise_edges(adj, node_labels, noise_level, random_seed=0):
+def read_comms_to_labels(root,dataset):
+    # 文件路径，替换为你的文件名
+    filename = os.path.join(root, dataset, f'{dataset}.comms')
+    # 读取文件
+    with open(filename, 'r') as file:
+        lines = file.readlines()
+    # 第一行是社区编号，可以忽略，因为我们的标签将根据社区的顺序自动分配
+    community_ids = lines[0].strip().split()
+    #先确定最大节点ID
+    max_node_id = 0
+    for line in lines[1:]:
+        node_ids = map(int, line.strip().split())
+        max_node_id = max(max_node_id, *node_ids)
+    # 初始化节点标签数组
+    labels = np.zeros(max_node_id + 1, dtype=int)  # 加1因为索引是从0开始的
+    # 遍历每个社区的节点，分配标签
+    for i, line in enumerate(lines[1:]):  # 从第二行开始遍历，i 从0开始
+        node_ids = map(int, line.strip().split())
+        for node_id in node_ids:
+            labels[node_id] = i  # 使用i作为标签，直接与社区编号对齐
+    return labels
+
+def add_noise_edges(adj, node_labels, ptb_rate, random_seed=0):
+    '''
+
+    :param adj:
+    :param node_labels:
+    :param ptb_rate: 扰动边占现有边的比例
+    :param random_seed:
+    :return:
+    '''
     np.random.seed(random_seed)
     num_nodes = adj.shape[0]
     num_edges = adj.sum() / 2
-    if noise_level == 1:
-        num_added_edges = int(num_edges * 0.3)
-    elif noise_level == 2:
-        num_added_edges = int(num_edges * 0.6)
-    elif noise_level == 3:
-        num_added_edges = int(num_edges * 0.9)
-    else:
-        return None
+    num_added_edges = int(num_edges * ptb_rate)
+    # if noise_level == 1:
+    #     num_added_edges = int(num_edges * 0.3)
+    # elif noise_level == 2:
+    #     num_added_edges = int(num_edges * 0.6)
+    # elif noise_level == 3:
+    #     num_added_edges = int(num_edges * 0.9)
+    # else:
+    #     return None
 
     # node_labels = np.argmax(node_labels, axis=-1)
 
@@ -67,42 +102,49 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=0, help='Random seed.')
     parser.add_argument('--root', type=str, default='../data', help='data store root')
-    parser.add_argument('--dataset', type=str, default='citeseer',
+    parser.add_argument('--dataset', type=str, default='cora',
                         choices=['football', 'facebook_all', 'cora', 'cora_ml', 'citeseer', 'polblogs', 'pubmed'],
                         help='dataset')
-    parser.add_argument('--noise_level', type=int, default=3, choices=[1, 2, 3], help='noisy level')
-    parser.add_argument('--ptb_rate', type=float, default=0.40, help='pertubation rate')
-    parser.add_argument('--type', type=str, default='add', help='attack type', choices=['add', 'remove', 'flip'])
-
+    # parser.add_argument('--noise_level', type=int, default=1, choices=[1, 2, 3], help='noisy level')
+    parser.add_argument('--ptb_rate', type=float, default=0.30, help='pertubation rate') #0.3,0.6,0.9对应123的等级
+    # parser.add_argument('--type', type=str, default='add', help='attack type', choices=['add', 'remove', 'flip'])
 
     args = parser.parse_args()
 
     # 读取原始邻接矩阵
-    dataset = args.dataset
-    if dataset in ['football', 'facebook_all']:
-        adj = txt_utils.load_txt_adj(args.root, dataset)
+    if args.dataset in ['football', 'facebook_all']:
+        adj = txt_utils.load_txt_adj(args.root, args.dataset)
         # 读取features
         # 读取labels
-        labels = txt_utils.read_comms_to_labels(args.root, dataset)
+        labels = txt_utils.read_comms_to_labels(args.root, args.dataset)
 
-    if dataset in ['cora', 'citeseer', 'pubmed']:  # 引文网络，deeprobust本身就有的
+    if args.dataset in ['cora', 'citeseer', 'pubmed']:  # 引文网络，deeprobust本身就有的
         # 读取临界矩阵
         graph = citation_loader.citation_graph_reader(args.root, args.dataset)  # 读取图 nx格式的
         adj = nx.adjacency_matrix(graph)  # 转换为CSR格式的稀疏矩阵
         # 读取标签
-        labels = citation_loader.citation_target_reader(args.root, dataset)  # 读取标签,ndarray:(2708,1)
-    if dataset in ['dblp', 'amazon']:  # sanp数据集上的
+        labels = citation_loader.citation_target_reader(args.root, args.dataset)  # 读取标签,ndarray:(2708,1)
+    elif args.dataset in ['cocs']:
+        graphx = nx.Graph()
+        with open(f'{args.root}/{args.dataset}/{args.dataset}.edges', "r") as f:
+            for line in f:
+                node1, node2 = map(int, line.strip().split())
+                graphx.add_edge(node1, node2)
+        adj = nx.adjacency_matrix(graphx)  # 转换为CSR格式的稀疏矩阵
+        #读取labels数据
+        labels = read_comms_to_labels(args.root,args.dataset)
+    if args.dataset in ['dblp', 'amazon']:  # sanp数据集上的
         # edge, labels = snap_utils.load_snap(args.root, data_set='com_' + dataset, com_size=3)  # edge是list:1049866
         # 将edge转换成csr_matrix
         pass
 
     # 注入随机噪声
-    modified_adj = add_noise_edges(adj, labels, args.noise_level, random_seed=0)
+    modified_adj = add_noise_edges(adj, labels, args.ptb_rate, random_seed=0)
 
     # 存储修改后的邻接矩阵
     # 存储成npz格式.
     path = os.path.join(args.root, args.dataset, 'add')
-    name = f'{args.dataset}_add_{args.noise_level}'
+    name = f'{args.dataset}_add_{args.ptb_rate}'
     sp.save_npz(os.path.join(path, name), modified_adj)
 
 

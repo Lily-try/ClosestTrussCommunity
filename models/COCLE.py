@@ -93,12 +93,12 @@ class Contra(nn.Module):
         loss = (total_intra_loss + alpha * total_inter_loss) + lam * loss_unsup
         return loss
 
-class EmbLearnerwithHyper(nn.Module):
+class COCLE(nn.Module):
     '''
     进行节点嵌入学习的神经网络模型
     '''
     def __init__(self, node_in_dim, hidden_dim, num_layers, dropout, tau, device, alpha, lam, k):
-        super(EmbLearnerwithHyper, self).__init__()
+        super(COCLE, self).__init__()
         self.num_layers = num_layers #GCN的层数
         self.dropout = dropout  # 丢弃率
         self.tau = tau #
@@ -383,11 +383,10 @@ class EmbLearnerwithHyper(nn.Module):
 
         return loss,h_
 
-    def valiates(self,train,edge_weight=None):
+    def valiates(self,train):
         '''
         模型不是训练阶段，直接使用原始视图的GNN层进行前馈获得节点嵌入并返回
         :param train:
-        :param edge_weight:
         :return:
         '''
         #获取数据
@@ -396,8 +395,8 @@ class EmbLearnerwithHyper(nn.Module):
         querys[q] = 1.0
 
         '**第0层**'
-        hq = F.relu(self.query_layers[0](querys, edge_index, edge_weight))  # 使用第1个图卷积层layersq[0]处理查询节点hq
-        h = F.relu(self.layers[0](feats, edge_index, edge_weight))  # 使用第1个图卷积层layersq[0]处理节点特征h
+        hq = F.relu(self.query_layers[0](querys, edge_index))  # 使用第1个图卷积层layersq[0]处理查询节点hq
+        h = F.relu(self.layers[0](feats, edge_index))  # 使用第1个图卷积层layersq[0]处理节点特征h
         # 计算注意力权重，将hq和q分别通过attetion_layerq和attetion_layer计算得到，然后拼接在一起
         atten_co = torch.cat([self.q_att_layer(hq, 0), self.att_layer(h, 0)], 1)
         atten_co = F.softmax(atten_co, dim=1).unsqueeze(2)  # 使用softmax将注意力权重归一化
@@ -420,8 +419,8 @@ class EmbLearnerwithHyper(nn.Module):
             h = F.dropout(h, training=self.training, p=self.dropout)
             hf = F.dropout(hf, training=self.training, p=self.dropout)
 
-            hq = F.relu(self.query_layers[_ + 1](hq, edge_index, edge_weight))
-            h = F.relu(self.layers[_ + 1](h, edge_index, edge_weight))
+            hq = F.relu(self.query_layers[_ + 1](hq, edge_index))
+            h = F.relu(self.layers[_ + 1](h, edge_index))
 
             atten_co = torch.cat([self.q_att_layer(hq, _ + 1), self.att_layer(h, _ + 1)], 1)
             atten_co = F.softmax(atten_co, dim=1).unsqueeze(2)
@@ -435,8 +434,8 @@ class EmbLearnerwithHyper(nn.Module):
         hf = F.dropout(hf, training=self.training, p=self.dropout)
 
         '************最后一层的卷积操作*********'
-        hq = self.query_layers[self.num_layers - 1](hq, edge_index, edge_weight)
-        h = self.layers[self.num_layers - 1](h, edge_index, edge_weight)
+        hq = self.query_layers[self.num_layers - 1](hq, edge_index)
+        h = self.layers[self.num_layers - 1](h, edge_index)
         atten_co = torch.cat(
             [self.q_att_layer(hq, self.num_layers - 1), self.att_layer(h, self.num_layers - 1)], 1)
         atten_co = F.softmax(atten_co, dim=1).unsqueeze(2)

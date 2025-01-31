@@ -83,7 +83,7 @@ def loadQuerys(dataset, root, train_n, val_n, test_n, train_path, test_path, val
     :param val_path:
     :return:
     '''
-    path_train = os.path.join(root,dataset,f'{dataset}_pos_train_{train_n}.txt')
+    path_train = os.path.join(root,dataset,f'{dataset}_{train_path}_{train_n}.txt')
     if not os.path.isfile(path_train):
         raise Exception("No such file: %s" % path_train)
     train_lists = []
@@ -98,7 +98,7 @@ def loadQuerys(dataset, root, train_n, val_n, test_n, train_path, test_path, val
             break
         train_lists.append((q, pos_, comm_))
 
-    path_test = os.path.join(root,dataset,f'{dataset}_test_{test_n}.txt')
+    path_test = os.path.join(root,dataset,f'{dataset}_{test_path}_{test_n}.txt')
     if not os.path.isfile(path_test):
         raise Exception("No such file: %s" % path_test)
     test_lists = []
@@ -110,7 +110,7 @@ def loadQuerys(dataset, root, train_n, val_n, test_n, train_path, test_path, val
         if len(test_lists)>=test_n:
             break
         test_lists.append((q, comm_))
-    path_val = os.path.join(root,dataset,f'{dataset}_val_{val_n}.txt')
+    path_val = os.path.join(root,dataset,f'{dataset}_{val_path}_{val_n}.txt')
     if not os.path.isfile(path_val):
         raise Exception("No such file: %s" % path_val)
     val_lists = []

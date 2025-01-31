@@ -9,6 +9,10 @@ from deeprobust.graph.utils import *
 from deeprobust.graph.data import Dataset
 import argparse
 
+'''
+基于random attack的插入边
+'''
+
 # 开始计时
 start_time = time.time()
 
@@ -19,8 +23,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--seed', type=int, default=15, help='Random seed.')
 parser.add_argument('--dataset', type=str, default='citeseer', choices=['football','facebook_all','cora', 'cora_ml', 'citeseer', 'polblogs', 'pubmed'], help='dataset')
 parser.add_argument('--ptb_rate', type=float, default=0.30,  help='pertubation rate')
-parser.add_argument('--type', type=str, default='add',  help=
-
+parser.add_argument('--type', type=str, default='flip',  help=
 'attack type',choices=['add','remove','flip'])
 parser.add_argument('--root', type=str, default='../data',  help='data store root')
 #配置

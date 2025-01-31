@@ -12,7 +12,7 @@ from torch_geometric.datasets import AttributedGraphDataset
 from torch_geometric.utils import add_remaining_self_loops, to_networkx
 
 from models.EmbLearner import EmbLearner
-from models.EmbLearnerWithHyper import EmbLearnerwithHyper
+from models.COCLE import COCLE
 from models.EmbLearnerWithWeights import EmbLearnerwithWeights
 from models.EmbLearnerWithoutHyper import EmbLearnerWithoutHyper
 from utils.load_utils import load_data, hypergraph_construction, loadQuerys
@@ -139,7 +139,7 @@ def Community_Search(args,logger):
         embLearner = EmbLearnerWithoutHyper(node_in_dim, args.hidden_dim, args.num_layers, args.drop_out, args.tau,device, args.alpha, args.lam, args.k)  # 去掉COCLEP中的超图视图，但得到的结果很差
 
     elif args.method == 'EmbLearnerwithHyper':
-        embLearner = EmbLearnerwithHyper(node_in_dim, args.hidden_dim,args.num_layers,args.drop_out,args.tau,device,args.alpha,args.lam,args.k) #COCLEP中的模型，目前和EmbLearner是一样的
+        embLearner = COCLE(node_in_dim, args.hidden_dim, args.num_layers, args.drop_out, args.tau, device, args.alpha, args.lam, args.k) #COCLEP中的模型，目前和EmbLearner是一样的
 
     elif args.method == 'EmbLearnerwithWeights':
         embLearner = EmbLearnerwithWeights(node_in_dim, args.hidden_dim,args.num_layers,args.drop_out,args.tau,device,args.alpha,args.lam,args.k) #传入edge_weight参数的模型

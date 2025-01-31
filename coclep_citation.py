@@ -14,13 +14,13 @@ from scipy.sparse import csr_matrix
 
 from utils.citation_loader import citation_graph_reader,citation_target_reader,citation_feature_reader
 from models.EmbLearner import EmbLearner
-from models.EmbLearnerWithHyper import EmbLearnerwithHyper
+from models.COCLE import COCLE
 from models.EmbLearnerWithWeights import EmbLearnerwithWeights
 from models.EmbLearnerWithoutHyper import EmbLearnerWithoutHyper
 from utils.load_utils import load_data, hypergraph_construction, loadQuerys
-from utils.log_utils import get_logger
-from utils.val_utils import f1_score_, NMI_score, ARI_score, JAC_score
-
+from utils.log_utils import get_logger, get_log_path
+from utils.cocle_val_utils import f1_score_, NMI_score, ARI_score, JAC_score, get_res_path, get_model_path, cal_pre
+import copy
 '''
 使用引文网络相关的数据集
 '''
@@ -41,6 +41,7 @@ def validation(val,nodes_feats, model, edge_index, edge_index_aug):
     s_m = s_ #记录可以取的最大的社区阈值
     while(s_<=0.9): #结束循环后得到的是从0.1按照0.05的步长不断增加社区阈值可以得到的最大的平均f1值f1_m和最优的s_取值s_m。
         f1_x = 0.0
+
         # print("------------------------------", s_) #s_是什么？？
         for q, comm, simlists in scorelists:
             comm_find = []
@@ -62,12 +63,67 @@ def validation(val,nodes_feats, model, edge_index, edge_index_aug):
     logger.info(f'best threshold: {s_m}, validation_set Avg F1: {f1_m}')
     return s_m, f1_m
 
+def validation_pre(val,nodes_feats, model, edge_index, edge_index_aug):
+    '''
+    改为选择precision最优的结果
+    :param val:
+    :param nodes_feats:
+    :param model:
+    :param edge_index:
+    :param edge_index_aug:
+    :return:
+    '''
+    scorelists = []
+    for q, comm in val:
+        h = model((q, None, edge_index, edge_index_aug, nodes_feats))
+        # 计算余弦相似度
+        sim=F.cosine_similarity(h[q].unsqueeze(0),h,dim=1) #(115,)
+        #使用 torch.sigmoid 将相似度值转换为概率，然后使用 squeeze(0) 移除多余的维度，
+        # 并将结果转移到 CPU，最后转换为 NumPy 数组并转换为 Python 列表。
+        simlists = torch.sigmoid(sim.squeeze(0)).to(
+            torch.device('cpu')).numpy().tolist()  # torch.sigmoid(simlists).numpy().tolist()
+        #将结果存储在scorelists中
+        scorelists.append([q, comm, simlists]) #记录该样本的测试结果
+    s_ = 0.1 #阈值？？
+    pre_m = 0.0 #记录最大的样本得分
+    s_m = s_ #记录可以取的最大的社区阈值
+    while(s_<=0.9): #结束循环后得到的是从0.1按照0.05的步长不断增加社区阈值可以得到的最大的平均f1值f1_m和最优的s_取值s_m。
+        pre_x = 0.0
+        # print("------------------------------", s_) #s_是什么？？
+        for q, comm, simlists in scorelists:
+            comm_find = []
+            for i, score in enumerate(simlists):#i是每个节点的编号；score是q与每个节点的相似得分。
+                if score >=s_ and i not in comm_find:
+                    comm_find.append(i)
+
+            comm_find = set(comm_find)
+            comm_find = list(comm_find)
+            comm = set(comm)
+            comm = list(comm)
+            pre = cal_pre(comm_find, comm)
+            pre_x= pre_x+pre #累加此样本的f1得分
+        pre_x = pre_x/len(val) #总的f1得分除以验证集样本数量
+        if pre_m<pre_x: #如果此社区阈值下得到的平均f1得分更高
+            pre_m = pre_x
+            s_m = s_
+        s_ = s_+0.05 #将s_进行增大。
+    logger.info(f'best threshold: {s_m}, validation_set Avg Pre: {pre_m}')
+    return s_m, pre_m
+
 def load_citations(args):
     '''********************1. 加载图数据******************************'''
     if args.attack == 'none':  # 使用原始数据
         if args.dataset in ['cora', 'pubmed', 'citeseer']:
             graphx = citation_graph_reader(args.root, args.dataset)  # 读取图 nx格式的
             print(graphx)
+            n_nodes = graphx.number_of_nodes()
+        elif args.dataset in ['cocs']:
+            graphx = nx.Graph()
+            with open(f'{args.root}/{args.dataset}/{args.dataset}.edges', "r") as f:
+                for line in f:
+                    node1, node2 = map(int, line.strip().split())
+                    graphx.add_edge(node1, node2)
+            print(f'{args.dataset}:', graphx)
             n_nodes = graphx.number_of_nodes()
     elif args.attack == 'random':
         path = os.path.join(args.root, args.dataset, args.attack,
@@ -76,9 +132,16 @@ def load_citations(args):
         graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
         print(graphx)
         n_nodes = graphx.number_of_nodes()
-    elif args.attack =='add': #metaGC中自己注入随机噪声
+    # elif args.attack =='add': #metaGC中自己注入随机噪声
+    #     path = os.path.join(args.root, args.dataset, args.attack,
+    #                         f'{args.dataset}_{args.attack}_{args.noise_level}.npz')
+    #     adj_csr_matrix = sp.load_npz(path)
+    #     graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
+    #     print(graphx)
+    #     n_nodes = graphx.number_of_nodes()
+    elif args.attack in ['del','gflipm','gdelm','gaddm','add']:
         path = os.path.join(args.root, args.dataset, args.attack,
-                            f'{args.dataset}_{args.attack}_{args.noise_level}.npz')
+                            f'{args.dataset}_{args.attack}_{args.ptb_rate}.npz')
         adj_csr_matrix = sp.load_npz(path)
         graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
         print(graphx)
@@ -111,15 +174,27 @@ def load_citations(args):
     edge_index = add_remaining_self_loops(edge_index, num_nodes=n_nodes)[0]
 
     '''2:************************加载训练数据**************************'''
-    train, val, test = loadQuerys(args.dataset, args.root, args.train_size, args.val_size, args.test_size,
+    if args.dataset.startswith('stb_'):
+        dataset = args.dataset[4:]
+    else:
+        dataset = args.dataset
+    train, val, test = loadQuerys(dataset, args.root, args.train_size, args.val_size, args.test_size,
                                   args.train_path, args.test_path, args.val_path)
-
     '3.*************加载特征数据************'
-    if args.dataset in ['cora', 'pubmed','citeseer']:
-        nodes_feats = citation_feature_reader(args.root, args.dataset)  # numpy.ndaaray:(2708,1433)
+    if args.dataset in ['cora','stb_cora','stb_citeseer','pubmed','citeseer']:
+        print('args.dataset[4:]',dataset)
+        nodes_feats = citation_feature_reader(args.root, dataset)  # numpy.ndaaray:(2708,1433)
         nodes_feats = torch.from_numpy(nodes_feats)  # 转换成tensor
         node_in_dim = nodes_feats.shape[1]
         print(f'{args.dataset}的feats dtype: {nodes_feats.dtype}')
+    elif args.dataset in ['cocs']:
+        with open(f'{args.root}/{args.dataset}/{dataset}.feats', "r") as f:
+            # 每行特征转换为列表，然后堆叠为 ndarray
+            nodes_feats = np.array([list(map(float, line.strip().split())) for line in f])
+            print('cocs的节点特征shape:', nodes_feats.shape)
+            nodes_feats = torch.from_numpy(nodes_feats)  # 转换成tensor
+            node_in_dim = nodes_feats.shape[1]
+
     return nodes_feats, train, val, test, node_in_dim, n_nodes, edge_index, edge_index_aug, adj_matrix, aa_tensor
 
 
@@ -145,10 +220,10 @@ def Community_Search(args,logger):
     elif args.method == 'EmbLearnerWithoutHyper':
         embLearner = EmbLearnerWithoutHyper(node_in_dim, args.hidden_dim, args.num_layers, args.drop_out, args.tau,device, args.alpha, args.lam, args.k)  # 去掉COCLEP中的超图视图，但得到的结果很差
 
-    elif args.method == 'EmbLearnerwithHyper':
-        embLearner = EmbLearnerwithHyper(node_in_dim, args.hidden_dim,args.num_layers,args.drop_out,args.tau,device,args.alpha,args.lam,args.k) #COCLEP中的模型，目前和EmbLearner是一样的
+    elif args.method == 'COCLE':
+        embLearner = COCLE(node_in_dim, args.hidden_dim, args.num_layers, args.drop_out, args.tau, device, args.alpha, args.lam, args.k) #COCLEP中的模型，目前和EmbLearner是一样的
 
-    elif args.method == 'EmbLearnerwithWeights':
+    elif args.method == 'EmbLearnerwithWeights': #将这个作为我的
         embLearner = EmbLearnerwithWeights(node_in_dim, args.hidden_dim,args.num_layers,args.drop_out,args.tau,device,args.alpha,args.lam,args.k) #传入edge_weight参数的模型
     else:
         raise ValueError(f'method {args.method} not supported')
@@ -160,6 +235,13 @@ def Community_Search(args,logger):
 
     pre_process_time = (datetime.datetime.now() - preprocess_start).seconds
     logger.info('start trainning')
+    val_best_f1 = 0.  # 记录最优的结果
+    val_bst_pre = 0.
+    val_bst_f1_ep = 0  # 记录取得最优结果的epoch
+    val_bst_pre_ep = 0  # 记录取得最优结果的epoch
+    val_bst_f1_model = copy.deepcopy(embLearner.state_dict())  # 存储最优的模型
+    val_bst_pre_model = copy.deepcopy(embLearner.state_dict())  # 存储最优的模型
+    #需要一个时间记录运行到最优的epoch后花费的时间
     #模型训练阶段
     train_start = datetime.datetime.now()  # 记录模型训练的开始时间
     for epoch in range(args.epoch_n):
@@ -181,29 +263,42 @@ def Community_Search(args,logger):
             i = i + 1
         epoch_time = (datetime.datetime.now() - start).seconds  # 运行每个epoch的时间
         logger.info(f'epoch_loss = {loss_b}, epoch = {epoch}, epoch_time = {epoch_time}')
+        # 每轮训练完成后，记录验证集上的准确度，选择最优的结果
+        embLearner.eval()
+        with torch.no_grad():
+            val_start = datetime.datetime.now()
+            s_,f1_ = validation(val,nodes_feats,embLearner,edge_index, edge_index_aug)
+            sp_,pre_ = validation(val,nodes_feats,embLearner,edge_index, edge_index_aug)
+            val_time = (datetime.datetime.now() - train_start).seconds  # 当前这个epoch的时间减去训练后的时间
+        if f1_ > val_best_f1:
+            val_best_f1 = f1_
+            val_bst_f1_ep = epoch
+            val_bst_f1_model = copy.deepcopy(embLearner.state_dict())  # 拷贝的是最佳的权重
+            logger.info(f"Type of val_best_model: {type(val_bst_f1_model)}")
+            val_bst_f1_time=(datetime.datetime.now() - train_start).seconds -val_time #当前这个epoch的时间减去训练后的时间,将验证的时间减去？？
+        if pre_ > val_bst_pre:
+            val_bst_pre = pre_
+            val_bst_pre_ep = epoch
+            val_bst_pre_model = copy.deepcopy(embLearner.state_dict())  # 拷贝的是最佳的权重
+            logger.info(f"Type of val_best_pre_model: {type(val_bst_pre_model)}")
+            val_bst_pre_time=(datetime.datetime.now() - train_start).seconds -val_time #当前这个epoch的时间减去训练后的时间,将验证的时间减去？？
 
-    training_time = (datetime.datetime.now() - train_start).seconds
+    training_time = (datetime.datetime.now() - train_start).seconds-val_time #将验证的时间减去
+    logger.info(f'===best F1 at epoch {val_bst_f1_ep}, Best F1:{val_best_f1} ===,Best epoch time:{val_bst_f1_time}')
+    logger.info(f'===best Pre at epoch {val_bst_pre_ep}, Best Precision:{val_bst_pre} ===,Best epoch time:{val_bst_pre_time}')
     logger.info(f'trainning time = {training_time}')
 
-    # model_path = './results/res_model/' + args.dataset + '_' + args.model_path + '.pkl'
-    # m_model_path = './results/res_model/' + args.dataset + '_' + args.m_model_path + '.pkl'
-    model_dir = './results/res_model/'
-    if not os.path.exists(model_dir):
-        os.makedirs(model_dir)
-    if args.attack == 'meta':
-        model_path = f'{model_dir}{args.dataset}_{args.attack}_{args.ptb_rate}_cs.pkl'
-    elif args.attack == 'random':
-        model_path = f'{model_dir}{args.dataset}_{args.attack}_{args.type}_{args.ptb_rate}_cs.pkl'
-    elif args.attack =='add':
-        model_path = f'{model_dir}{args.dataset}_{args.attack}_{args.noise_level}_cs.pkl'
-    else:
-        model_path = args.res_root + args.dataset + '_res.txt'
-
-    torch.save(embLearner.state_dict(), model_path)  #存储训练好的模型
+    bst_model_path = get_model_path('./results/coclep/res_model/',args)
+    torch.save(val_bst_f1_model, f'{bst_model_path}_f1.pkl')  # 存储最优的模型
+    torch.save(val_bst_pre_model,f'{bst_model_path}_pre.pkl') #存储最优pre的模型
 
     #评估阶段
     logger.info(f'#################### Starting evaluation######################')
-    embLearner.load_state_dict(torch.load(model_path))  # 加载模型
+    #目前是加载具有最优pre的模型
+    if args.val_type == 'pre':
+        embLearner.load_state_dict(torch.load(f'{bst_model_path}_pre.pkl'))  # 加载模型
+    else:
+        embLearner.load_state_dict(torch.load(f'{bst_model_path}_f1.pkl'))  # 加载模型
     embLearner.eval()
 
     F1 = 0.0
@@ -219,8 +314,12 @@ def Community_Search(args,logger):
 
     with torch.no_grad():
         #使用验证集数据找打最佳阈值s_
-        s_, f1_ = validation(val, nodes_feats, embLearner, edge_index, edge_index_aug)
-        logger.info(f'evaluation time = {datetime.datetime.now() - eval_start}, best s_={s_}, best val f1_={f1_}')
+        if args.val_type == 'f1':
+            s_, f1_ = validation(val, nodes_feats, embLearner, edge_index, edge_index_aug)
+            logger.info(f'evaluation time = {datetime.datetime.now() - eval_start}, best s_={s_}, best val f1_={f1_}')
+        elif args.val_type == 'pre':
+            s_, pre_ = validation_pre(val, nodes_feats, embLearner, edge_index, edge_index_aug)
+            logger.info(f'evaluation time = {datetime.datetime.now() - eval_start}, best s_={s_}, best val pre_={pre_}')
         #开始测试
         logger.info(f'#################### starting test  ####################')
         for q,comm in test:
@@ -268,19 +367,15 @@ def Community_Search(args,logger):
     logger.info(f'Test_set Avg NMI = {nmi_score}, ARI = {ari_score}, JAC = {jac_score}')
 
     # 存储测试结果
-    if args.attack == 'meta':
-        output = args.res_root + args.dataset + f'_{args.attack}_{args.ptb_rate}_res.txt'
-    elif args.attack == 'random':
-        output = args.res_root + args.dataset + f'_{args.attack}_{args.type}_{args.ptb_rate}_res.txt'
-    elif args.attack =='add':
-        output = args.res_root + args.dataset + f'_{args.attack}_{args.noise_level}_res.txt'
-    else:
-        output = args.res_root + args.dataset + '_res.txt'
-    with open(output, 'a+') as fh:
+    output = get_res_path('./results/coclep/', args)
+    with open(output, 'a+',encoding='utf-8') as fh:
         current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # f"best_comm_threshold: {s_}, best_validation_Avg_F1: {f1_}\n"
         line = (
             f"args: {args}\n"
-            f"best_comm_threshold: {s_}, best_validation_Avg_F1: {f1_}\n"
+            f"bst_f1_epoch:{val_bst_f1_ep}, bst_ep_time:{val_bst_f1_time}, bst_ep_f1:{val_best_f1}\n"
+            f"bst_pre_epoch:{val_bst_pre_ep}, bst_ep_time:{val_bst_pre_time}, bst_ep_f1:{val_bst_pre}\n"
+            f"best_comm_threshold: {s_}\n"
             f"pre_process_time: {pre_process_time}\n"
             f"training_time: {training_time}\n"
             f"test_running_time: {test_running_time}\n"
@@ -303,11 +398,11 @@ if __name__ == '__main__':
     # 重复次数，论文中常用的重复5次取平均
     parser.add_argument('--count', type=int, default=1)
     parser.add_argument('--root', type=str, default='./data')
-    parser.add_argument('--res_root', type=str, default='./results/', help='result path')
+    # parser.add_argument('--res_root', type=str, default='./results/', help='result path')
     # parser.add_argument("--log", action='store_true', help='run prepare_data or not')
     parser.add_argument("--log", type=bool,default=True, help='run prepare_data or not')
     # 训练完毕的模型的存储路径
-    parser.add_argument('--method',type=str,default='EmbLearner',choices=['EmbLearner','EmbLearnerWithoutHyper','EmbLearnerwithWeights'])
+    parser.add_argument('--method',type=str,default='COCLE',choices=['EmbLearner','COCLE','EmbLearnerWithoutHyper','EmbLearnerwithWeights'])
     parser.add_argument('--model_path', type=str, default='CS')
     parser.add_argument('--m_model_path', type=str, default='META')
 
@@ -317,13 +412,13 @@ if __name__ == '__main__':
     parser.add_argument('--train_size', type=int, default=300)
     parser.add_argument('--val_size', type=int, default=100)
     parser.add_argument('--test_size', type=int, default=500)
-    parser.add_argument('--train_path', type=str, default='pos_train.txt')
-    parser.add_argument('--test_path', type=str, default='test.txt')
-    parser.add_argument('--val_path', type=str, default='val.txt')
+    parser.add_argument('--train_path', type=str, default='pos_train')
+    parser.add_argument('--test_path', type=str, default='test')
+    parser.add_argument('--val_path', type=str, default='val')
     parser.add_argument('--feats_path', type=str, default='feats.txt')
-
+    parser.add_argument('--val_type', type=str, default='pre',help='pre or f1 to val')
     # 控制攻击方法、攻击类型和攻击率
-    parser.add_argument('--attack', type=str, default='none', choices=['none', 'random', 'meta_attack','add'])
+    parser.add_argument('--attack', type=str, default='none', choices=['none', 'random', 'meta_attack','add','del','gflipm','gdelm','gaddm'])
     parser.add_argument('--type', type=str, default='add', help='random attack type', choices=['add', 'remove', 'flip'])
     parser.add_argument('--noise_level', type=int, default=3, choices=[1, 2, 3], help='noisy level')
     parser.add_argument('--ptb_rate', type=float, default=0.30, help='pertubation rate')
@@ -361,18 +456,11 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     if args.log:
-        if args.attack == 'meta':
-            log_path = './log/' + args.dataset + f'_{args.attack}_{args.ptb_rate}_{args.method}.log'
-        elif args.attack == 'random':
-            log_path = './log/' + args.dataset + f'_{args.attack}_{args.type}_{args.ptb_rate}_{args.method}.log'
-        elif args.attack == 'add':
-            log_path = './log/'  + args.dataset + f'_{args.attack}_{args.noise_level}_{args.method}.log'
-        else:
-            log_path = './log/' + args.dataset +f'_{args.method}.log'
-        # logger = get_logger('./log/' + args.attack + '/' + 'ours_' + args.dataset + '_' + str(args.ptb_rate) + '.log')
+        log_path = get_log_path('./log/coclep/', args)
         logger = get_logger(log_path)
+        print(f'save logger to {log_path}')
     else:
-        logger = get_logger('./log/try.log')
+        logger = get_logger()
 
     # 预处理时间，模型训练时间，测试时间
     pre_process_time_A, train_model_running_time_A, test_running_time_A = 0.0, 0.0, 0.0
@@ -432,17 +520,9 @@ if __name__ == '__main__':
     test_running_time_A = test_running_time_A / float(args.count)
 
     # 将得到的结果进行存储，此时存储的是多次的average的各个指标。
-    # output = args.res_root + args.dataset + '_res.txt'
     # 存储测试结果
-    if args.attack == 'meta':
-        output = args.res_root + args.dataset + f'_{args.attack}_{args.ptb_rate}_res.txt'
-    elif args.attack == 'random':
-        output = args.res_root + args.dataset + f'_{args.attack}_{args.type}_{args.ptb_rate}_res.txt'
-    elif args.attack =='add':
-        output = args.res_root + args.dataset + f'_{args.attack}_{args.noise_level}_res.txt'
-    else:
-        output = args.res_root + args.dataset + '_res.txt'
-    with open(output, 'a+') as fh:  # 记录的是 count 次的各个平均结果
+    output = get_res_path('./results/coclep/', args)
+    with open(output, 'a+',encoding='utf-8') as fh:  # 记录的是 count 次的各个平均结果
         current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         line = (
             f"average {args}\n"
