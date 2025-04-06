@@ -16,6 +16,7 @@ from scipy.sparse import csr_matrix
 from config import get_config
 from models.EmbLearnerDyKnn import EmbLearnerDyKNN
 from models.EmbLearnerKnn import EmbLearnerKNN
+from models.EmbLearnerKnnGrad import EmbLearnerKNNGrad
 from utils.citation_loader import citation_graph_reader,citation_target_reader,citation_feature_reader
 from models.EmbLearner import EmbLearner
 from models.COCLE import COCLE
@@ -250,6 +251,11 @@ def construct_augG(aug,nodes_feats,edge_index,n_nodes):
         logger.error('请指定使用的aug类型')
         return None
     return edge_index_aug
+def update_adj(adj_grad,h):
+
+
+    pass
+
 def Community_Search(args,logger):
 
     preprocess_start = datetime.datetime.now()
@@ -260,6 +266,10 @@ def Community_Search(args,logger):
     nodes_feats, train, val, test, node_in_dim, n_nodes, edge_index, adj_matrix, aa_th = load_citations(args)
     nodes_feats = nodes_feats.to(device)
     edge_index = edge_index.to(device)
+    # edge_weights = torch.nn.Parameter(torch.ones(edge_index.size(1)),device = device)
+    edge_weights = torch.nn.Parameter(torch.ones(edge_index.size(1), device=device))
+    # 为每条边分配一个可训练的权重,用于计算损失相对于邻接矩阵的梯度
+    #是不是应该随机初始化呢
     #根据初始的特征矩阵获取增强的edge_index
     edge_index_aug = construct_augG(args.aug,nodes_feats,edge_index,n_nodes)
     if edge_index_aug !=None:
@@ -279,6 +289,8 @@ def Community_Search(args,logger):
         embLearner = EmbLearnerKNN(node_in_dim, args.hidden_dim,args.num_layers,args.drop_out,args.tau,device,args.alpha,args.lam,args.k) #COCLEP中的模型，目前和EmbLearner是一样的
     elif args.method == 'EmbLearnerwithWeights': #将这个作为我的
         embLearner = EmbLearnerwithWeights(node_in_dim, args.hidden_dim,args.num_layers,args.drop_out,args.tau,device,args.alpha,args.lam,args.k) #传入edge_weight参数的模型
+    elif args.method == 'Grad': #将这个作为我的
+        embLearner = EmbLearnerKNNGrad(node_in_dim, args.hidden_dim,args.num_layers,args.drop_out,args.tau,device,args.alpha,args.lam,args.k) #
     else:
         raise ValueError(f'method {args.method} not supported')
 
@@ -306,9 +318,16 @@ def Community_Search(args,logger):
                 i = i + 1
                 continue
             # 前馈
-            loss,h = embLearner((q, pos, edge_index, edge_index_aug, nodes_feats))
+            loss,h = embLearner((q, pos, edge_index, edge_index_aug, nodes_feats),edge_weights)
+            # adj_grad = torch.autograd.grad(loss,edge_weights, retain_graph=False)[0]
+            # print('测试adj_grad的类型',type(adj_grad),'adj_grad的形状',adj_grad.shape)
             loss_b = loss_b + loss.item()  # 累积批次中的损失
             loss.backward()
+            print("edge_weights.requires_grad:", edge_weights.requires_grad)
+            print("edge_weights is leaf:", edge_weights.is_leaf)
+            adj_grad = edge_weights.grad
+            print('edge_index的shape:',edge_index.shape)#[2,13264]
+            print('测试adj_grad的类型',type(adj_grad),'adj_grad的形状',adj_grad.shape) #因为edge_index中添加了自环，因此这里面也包含自环 13264
             if (i + 1) % args.batch_size == 0:
                 if args.aug == 'dyknn':  # 让knn图使用训练过程中的节点嵌入变化。放在这里就是每经过一个批次的数据更新一下创建的knn图。
                     edge_index_aug = construct_augG(args.aug, h, edge_index, n_nodes)

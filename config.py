@@ -10,7 +10,7 @@ def get_config():
     # parser.add_argument("--log", action='store_true', help='run prepare_data or not')
     parser.add_argument("--log", type=bool,default=True, help='run prepare_data or not')
     # 训练完毕的模型的存储路径
-    parser.add_argument('--method',type=str,default='knn',choices=['EmbLearner','EmbLearnerWithoutHyper','EmbLearnerwithWeights','knn','dyknn'])
+    parser.add_argument('--method',type=str,default='Grad',choices=['EmbLearner','EmbLearnerWithoutHyper','EmbLearnerwithWeights','knn','dyknn','Grad'])
     parser.add_argument('--model_path', type=str, default='CS')
     parser.add_argument('--m_model_path', type=str, default='META')
 

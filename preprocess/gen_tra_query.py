@@ -211,7 +211,7 @@ if __name__ == '__main__':
     k =3  #生成所需要的k
     if dataset.startswith('fb'):
         graphx = load_FB(root,dataset,attack,k,ptb_rate=ptb_rate,noise_level=noise_level)
-    else:
+    else: #将攻击图转换成txt文件的格式存入文件
         graphx = change_graph_type(root, dataset, attack,k, ptb_rate=ptb_rate, noise_level=noise_level)
     # graphx = read_graph(root, dataset, attack, ptb_rate=ptb_rate, noise_level=noise_level)
     #k-clique
