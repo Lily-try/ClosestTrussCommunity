@@ -1,0 +1,11 @@
+k : 2
+Overall running time: 3.675s.
+diameter : 2
+
+
+
+ans.V.size: 
+4 477 853 1073 1801 
+477 1801
+853 1801
+1073 1801

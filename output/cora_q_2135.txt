@@ -1,0 +1,10 @@
+k : 2
+Overall running time: 3.773s.
+diameter : 2
+
+
+
+ans.V.size: 
+3 922 1352 2135 
+922 2135
+1352 2135

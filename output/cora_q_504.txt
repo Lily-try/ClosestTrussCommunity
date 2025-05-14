@@ -1,0 +1,11 @@
+k : 2
+Overall running time: 3.706s.
+diameter : 2
+
+
+
+ans.V.size: 
+4 577 1693 2002 504 
+504 577
+504 2002
+504 1693

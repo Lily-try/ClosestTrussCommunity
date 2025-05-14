@@ -1,0 +1,11 @@
+k : 3
+Overall running time: 0.006s.
+diameter : 1
+
+
+
+ans.V.size: 
+3 677 1956 2236 
+677 2236
+677 1956
+1956 2236
