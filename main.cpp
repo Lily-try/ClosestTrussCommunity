@@ -63,9 +63,10 @@ void CTC() {
         // cerr << "fairness:" << theta * (int) attr_set.size() << '\n';
     }
     k = lk - 1;
-    debug(k);
+    // debug(k);
     if(k < 2) {
         cerr << "No solotion!\n";
+        cout << -1 << endl;
         assert(0);
     }
 
@@ -313,7 +314,7 @@ void CTC() {
     clock_t endend = clock();
     cerr << "Delete running time: " << double(endend - end) / CLOCKS_PER_SEC << "s.\n";
     // cerr << "CTC completed." << endl;
-    cout << "Overall running time: " << double(endend - start) / CLOCKS_PER_SEC << "s.\n";
+    // cout << "Overall running time: " << double(endend - start) / CLOCKS_PER_SEC << "s.\n";
     cerr << "CTC completed." << endl;
     // assert(0);
 }
@@ -357,9 +358,10 @@ int main(int argc, char * argv[])
     cerr << endl;
     
     string output_name = "./output/" + dataset + "_q";
-    for(auto tq : q) output_name += "_" + to_string(tq);
-    output_name += ".txt";
-    freopen(output_name.c_str(), "w", stdout);
+    // for(auto tq : q) output_name += "_" + to_string(tq);
+    // output_name += ".txt";
+    output_name = "./output/cora_summary.txt";
+    freopen(output_name.c_str(), "a", stdout);
     
     cin >> n >> m;
     for (int i = 1; i <= m; i++)
@@ -391,17 +393,17 @@ int main(int argc, char * argv[])
     truss_decomposition();
     cerr << "Truss decomposition completed." << endl;
     CTC();
-    cout << "diameter : " << compute_diam(ans) << '\n';
+    // cout << "diameter : " << compute_diam(ans) << '\n';
     cerr << "Diameter calculation completed." << endl;
 
-    cout << "\n\n\n";
-    cout << "ans.V.size: \n" << ans.V.size() << " ";
+    // cout << "\n\n\n";
+    cout << ans.V.size() << " ";
     for(auto u : ans.V) cout << u << " ";
     cout << endl;
-    for(auto u : ans.V) {
-        for(auto v : ans.G[u]) {
-            if(u < v) cout << u << " " << v << endl;
-        }
-    }
+    // for(auto u : ans.V) {
+    //     for(auto v : ans.G[u]) {
+    //         if(u < v) cout << u << " " << v << endl;
+    //     }
+    // }
     return 0;
 }

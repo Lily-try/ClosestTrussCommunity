@@ -1,3 +1,4 @@
+g++ main.cpp -o main
 .\main.exe cora 3 2267 1527 1118
 .\main.exe cora 8 846 1447 222 1575 2403 2139 927 2141
 .\main.exe cora 2 2598 1251
