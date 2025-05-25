@@ -1,9 +1,0 @@
-k : 2
-Overall running time: 3.567s.
-diameter : 1
-
-
-
-ans.V.size: 
-2 459 1123 
-459 1123

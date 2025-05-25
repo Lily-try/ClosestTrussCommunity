@@ -314,7 +314,7 @@ void CTC() {
     clock_t endend = clock();
     cerr << "Delete running time: " << double(endend - end) / CLOCKS_PER_SEC << "s.\n";
     // cerr << "CTC completed." << endl;
-    // cout << "Overall running time: " << double(endend - start) / CLOCKS_PER_SEC << "s.\n";
+    cout << "Overall running time: " << double(endend - start) / CLOCKS_PER_SEC << "s. ";
     cerr << "CTC completed." << endl;
     // assert(0);
 }
@@ -351,7 +351,7 @@ int main(int argc, char * argv[])
     int q_cnt = stoi(argv[2]);
 
     for(int i = 3;i <= q_cnt + 2;i++) {
-        q.insert(stoi(argv[i]));
+        q.insert(stoi(argv[i]) + 1);
     }
     cerr << "q: ";
     for(auto tq : q) cerr << tq << " ";
@@ -398,7 +398,7 @@ int main(int argc, char * argv[])
 
     // cout << "\n\n\n";
     cout << ans.V.size() << " ";
-    for(auto u : ans.V) cout << u << " ";
+    for(auto u : ans.V) cout << u - 1 << " ";
     cout << endl;
     // for(auto u : ans.V) {
     //     for(auto v : ans.G[u]) {
