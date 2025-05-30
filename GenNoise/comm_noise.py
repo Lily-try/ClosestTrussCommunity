@@ -147,6 +147,7 @@ def flip_edge_degree_mode(p, mx):
     :param mx:
     :return:
     '''
+    print('in flip_edge_degree_mode method ')
     adj = copy.deepcopy(mx)
     G = from_numpy_array(adj)
     ## Degree of each node
@@ -247,7 +248,8 @@ def graph_partition(G):
     unnecessary overhead. The dataset here is Cora.
     Input G - The networkx type graph we want to know the partiton
     '''
-    import community as community_louvain
+    # import community as community_louvain
+    import community.community_louvain as community_louvain
     import json
 
     file_path = 'community.txt'
@@ -308,11 +310,12 @@ def del_edge_community_avg(p, mx):
 
 def del_edge_community_mode(p, mx):
     '''
-    删除边以达到众数度。
+    从社区的边列表中删除一部分边以达到众数度。
     :param p:
     :param mx:
     :return:
     '''
+    print('按照众数删除社区内部边')
     adj = copy.deepcopy(mx)
     G = from_numpy_array(adj)
     num_del = sum(sum(mx)) - sum(sum(del_edge_degree_mode(p, mx)))
@@ -831,11 +834,11 @@ if __name__ == '__main__':
                  17: add_edge_global_avg, 18: add_edge_global_mode}
     #一个缩写形式，便于文件命名
     name_dict =  {0: no_operation,
-                 1: del_edge_degree_avg, 2: del_edge_degree_mode,
-                 3: del_edge_community_avg, 4: del_edge_community_mode,
+                 1: del_edge_degree_avg, 2: 'delm',
+                 3: del_edge_community_avg, 4: 'cdelm',
                  5: del_edge_global_avg, 6: 'gdelm',
-                 7: flip_edge_degree_avg, 8: flip_edge_degree_mode,
-                 9: flip_edge_community_avg, 10: flip_edge_community_mode,
+                 7: flip_edge_degree_avg, 8: 'flipm',
+                 9: flip_edge_community_avg, 10: 'cflipm',
                  11: flip_edge_global_avg, 12: 'gflipm',
                  13: add_edge_degree_avg, 14: add_edge_degree_mode,
                  15: add_edge_community_avg, 16: add_edge_community_mode,
@@ -843,19 +846,19 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=0, help='Random seed.')
     parser.add_argument('--root', type=str, default='../data', help='data store root')
-    parser.add_argument('--dataset', type=str, default='cora',
+    parser.add_argument('--dataset', type=str, default='cocs',
                         choices=['cora','citeseer','cocs','facebook_all', 'cora', 'cora_ml', 'citeseer', 'polblogs', 'pubmed'],
                         help='dataset')
-    parser.add_argument('--method', type=int, default=18,choices=[6,12,18],help='noise type')
-    parser.add_argument('--ptb_rate', type=float, default=0.50, help='pertubation rate')
+    parser.add_argument('--method', type=int, default=8,choices=[6,12,18,4,10,2,8],help='noise type')
+    parser.add_argument('--ptb_rate', type=float, default=0.40, help='pertubation rate')
 
     args = parser.parse_args()
-
+    print(f'读取{args.dataset}数据集')
     #① 读取原始邻接矩阵
     adj_matrix = load_graph(args.root,args.dataset)
 
     #② 进行加噪
-    modified_adj= del_edge_global_mode(args.ptb_rate,adj_matrix)
+    # modified_adj= del_edge_global_mode(args.ptb_rate,adj_matrix)   #
     modified_adj= func_dict[args.method](args.ptb_rate,adj_matrix)
 
 
@@ -869,5 +872,6 @@ if __name__ == '__main__':
     #4读取加噪后的邻接矩阵
     adj_csr_matrix = sp.load_npz(f'{save_path}/{save_name}')
     graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
-    print(graphx)
+    print('加入噪声后的邻接矩阵：',graphx)
+    # print(graphx)
     n_nodes = graphx.number_of_nodes()

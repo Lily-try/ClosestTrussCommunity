@@ -22,7 +22,7 @@ from utils.proj_settings import *
 from tqdm import tqdm
 from heapq import heapify, heappushpop, merge as heap_merge, nlargest, nsmallest
 import pickle
-from utils.citation_loader import citation_graph_reader,citation_feature_reader,citation_target_reader
+from utils.citation_loader import load_graph,citation_graph_reader,citation_feature_reader,citation_target_reader
 import dgl
 def graph_normalization(g, cuda):
     degs = g.in_degrees().float()
@@ -35,13 +35,14 @@ def graph_normalization(g, cuda):
 
 
 def stratified_train_test_split(label_idx, labels, num_nodes, train_rate, seed=2021):
+    #此即训练比例。
     num_train_nodes = int(train_rate / 100 * num_nodes) #划分比例是5%，则训练集有5/100*2708=135个节点
     test_rate_in_labeled_nodes = (len(labels) - num_train_nodes) / len(labels) #验证+测试集的节点比例
     train_idx, test_and_valid_idx = train_test_split(
         label_idx, test_size=test_rate_in_labeled_nodes, random_state=seed, shuffle=True, stratify=labels)
     valid_idx, test_idx = train_test_split(
         test_and_valid_idx, test_size=.5, random_state=seed, shuffle=True, stratify=labels[test_and_valid_idx])
-    return train_idx, valid_idx, test_idx
+    return train_idx, valid_idx, test_idx,num_train_nodes
 
 def save_split_indices(dataset, root, train_idx, val_idx, test_idx):
     save_dir = os.path.join(root, dataset,'gsr')
@@ -162,36 +163,36 @@ def load_features(root,dataset):
     return features  # shape: [N, F]
 
 def load_adj(root,dataset,attack,ptb_rate): #torch.Tenso
-    if attack == 'none':  # 使用原始数据
-        if dataset in ['cora', 'pubmed', 'citeseer']:
-            graphx = citation_graph_reader(root, dataset)  # 读取图 nx格式的
-            print(graphx)
-            n_nodes = graphx.number_of_nodes()
-        elif dataset in ['cocs']:
-            graphx = nx.Graph()
-            with open(f'{root}/{dataset}/{dataset}.edges', "r") as f:
-                for line in f:
-                    node1, node2 = map(int, line.strip().split())
-                    graphx.add_edge(node1, node2)
-            print(f'{dataset}:', graphx)
-            n_nodes = graphx.number_of_nodes()
-    elif attack == 'random':
-        path = os.path.join(root, dataset, attack,
-                            f'{dataset}_{attack}_{type}_{ptb_rate}.npz')
-        adj_csr_matrix = sp.load_npz(path)
-        graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
-        print(graphx)
-        n_nodes = graphx.number_of_nodes()
-    elif attack in ['del', 'gflipm', 'gdelm', 'add','gaddm']:
-        path = os.path.join(root, dataset, attack,
-                            f'{dataset}_{attack}_{ptb_rate}.npz')
-        adj_csr_matrix = sp.load_npz(path)
-        graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
-        print(graphx)
-        n_nodes = graphx.number_of_nodes()
-    else:
-        raise ValueError(f'Unsupported attack type:{attack}')
-
+    # if attack == 'none':  # 使用原始数据
+    #     if dataset in ['cora', 'pubmed', 'citeseer']:
+    #         graphx = citation_graph_reader(root, dataset)  # 读取图 nx格式的
+    #         print(graphx)
+    #         n_nodes = graphx.number_of_nodes()
+    #     elif dataset in ['cocs']:
+    #         graphx = nx.Graph()
+    #         with open(f'{root}/{dataset}/{dataset}.edges', "r") as f:
+    #             for line in f:
+    #                 node1, node2 = map(int, line.strip().split())
+    #                 graphx.add_edge(node1, node2)
+    #         print(f'{dataset}:', graphx)
+    #         n_nodes = graphx.number_of_nodes()
+    # elif attack == 'random':
+    #     path = os.path.join(root, dataset, attack,
+    #                         f'{dataset}_{attack}_{type}_{ptb_rate}.npz')
+    #     adj_csr_matrix = sp.load_npz(path)
+    #     graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
+    #     print(graphx)
+    #     n_nodes = graphx.number_of_nodes()
+    # elif attack in ['del', 'gflipm', 'gdelm', 'add','gaddm']:
+    #     path = os.path.join(root, dataset, attack,
+    #                         f'{dataset}_{attack}_{ptb_rate}.npz')
+    #     adj_csr_matrix = sp.load_npz(path)
+    #     graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
+    #     print(graphx)
+    #     n_nodes = graphx.number_of_nodes()
+    # else:
+    #     raise ValueError(f'Unsupported attack type:{attack}')
+    graphx,n_nodes = load_graph(root,dataset,attack,ptb_rate)
     #需要节点是从0开始的连续编号？
     #将其转换成DGLGraph
     g = dgl.from_networkx(graphx)
@@ -244,17 +245,18 @@ def preprocess_data(root,dataset,attack,ptb_rate,train_percentage=0):
     labels = load_labels(root,dataset,g.num_nodes())
     nclass = len(set(labels.tolist()))
 
-    #4.加载训练集、验证集和测试集
+    #4.加载训练集、验证集和测试集  如果输入的是0，则是读取默认的。
     load_default_split = train_percentage<=0
     load_dir = f'{root}/{dataset}/gsr/'
-    if os.path.isfile(f'{load_dir}/{dataset}.train') and load_default_split: #要求读取默认的，并且缺失已经生成了默认的
+    if os.path.isfile(f'{load_dir}/{dataset}.train') and load_default_split: #要求读取默认的，并且确实已经生成了默认的
         train = np.loadtxt(f'{load_dir}/{dataset}.train', dtype=int)
         val = np.loadtxt(f'{load_dir}/{dataset}/{dataset}.val', dtype=int)
         test = np.loadtxt(f'{load_dir}/{dataset}/{dataset}.test', dtype=int)
     else:#重新生成训练集、、、
+        print('正在重新生成训练集')
         if th.is_tensor(labels):
             labels = labels.numpy()
-        train,val,test =  stratified_train_test_split(np.arange(len(labels)), labels, len(labels),train_percentage)
+        train,val,test,num_train_nodes =  stratified_train_test_split(np.arange(len(labels)), labels, len(labels),train_percentage)
         save_split_indices(dataset=dataset, root=root, train_idx=train, val_idx=val, test_idx=test)
 
     #将读取的数据都转换成tensor
@@ -267,7 +269,7 @@ def preprocess_data(root,dataset,attack,ptb_rate,train_percentage=0):
     print('标签节点个数',len(labels))
     print('训练集的形状依次是：',train.shape, val.shape, test.shape) #是：torch.Size([140]）torch.Size([500]）torch.Size([1000])
 
-    return g, features, features.shape[1], nclass, labels, train, val, test
+    return g, features, features.shape[1], nclass, labels, train, val, test,num_train_nodes
 
 # * ============================= Torch =============================
 def topk_sim_edges(sim_mat, k, row_start_id, largest):

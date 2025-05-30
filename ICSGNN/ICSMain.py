@@ -1,12 +1,13 @@
-from ICSGNN.parser import parameter_parser
+from parser import parameter_parser
 from citation_loader import citation_feature_reader, citation_target_reader, citation_graph_reader
+from load_utils import load_graph
 from src.subgraph import SubGraph
 from src import utils
 import torch
 from torch_geometric.datasets import Reddit
 from src.pre_community import *
 import scipy.sparse as sp
-
+import datetime
 
 #加载数据
 def load_data(args):
@@ -49,25 +50,63 @@ def load_citations(args):
     seed_list = None
     train_nodes = None
     labels = None
-    #加载特征数据
+    #第一步：加载特征数据
     if args.dataset in ['cora','citeseer','pubmed']:
         features = citation_feature_reader(args.root,args.dataset)
+    elif args.dataset in ['cocs']:
+        with open(f'{args.root}/{args.dataset}/{args.dataset}.feats', "r") as f:
+            # 每行特征转换为列表，然后堆叠为 ndarray
+            nodes_feats = np.array([list(map(float, line.strip().split())) for line in f])
+            print('cocs的节点特征shape:',nodes_feats.shape)
+
     #加载标签数据
     if args.dataset in ['cora', 'citeseer', 'pubmed']:
         target = citation_target_reader(args.root,args.dataset)  # 所有节点的标签
         target = target.reshape(-1, 1)
+    elif args.dataset in ['cocs']:  # 加载共同作者数据
+        with open(f'{args.root}/{args.dataset}/{args.dataset}.comms', 'r') as f:
+            lines = f.readlines()
+        lines = lines[1:]# 跳过第一行的社区编号（你可以用也可以不用，反正是从0开始按行编号）
+
+        # 统计最大节点ID以确定labels数组大小
+        max_node_id = -1
+        community_nodes = []
+        for line in lines:
+            nodes = list(map(int, line.strip().split()))
+            if nodes:
+                community_nodes.append(nodes)
+                max_node_id = max(max_node_id, max(nodes))
+        labels = np.zeros(max_node_id + 1, dtype=int)  #初始化label数组，默认是0
+        for comm_id, nodes in enumerate(community_nodes):
+            for node_id in nodes:
+                labels[node_id] = comm_id
+        target =labels.reshape(-1,1)  #id为索引位置的节点对应的标签（社区）编号。
+
     #加载图数据
-    graph = load_graph(args)
+    graph,n_nodes = load_graph(args.root,args.dataset,args.attack,args.ptb_rate)
 
     #加载训练数据(seed,train_nodes(pos,neg))
     file_path = f'{args.root}/{args.dataset}/ics/{args.dataset}_{args.attack}_{args.ptb_rate}_data.json'
-    if os.path.exists(file_path):
+    if os.path.exists(file_path):#说明之前已经调用了对应的my_pre_com方法。
         seed_list, train_nodes, labels, gtcomms = load_data_json(file_path)
-    else:
+    else: #新生成训练数据,并存储到json，这里我已经设定是3个正标签，3个负标签了
         seed_list, train_nodes, labels, gtcomms = my_pre_com(args, subgraph_list=[args.subgraph_size],train_ratio=args.train_ratio,seed_cnt=args.seed_cnt,cmty_size=args.community_size)
 
-    return graph, features, target, seed_list, train_nodes, labels
-
+    return graph, features, target, seed_list, train_nodes, labels,gtcomms
+def get_res_path(resroot,args,method):
+    '''
+    根据args创建需要的结果路径
+    :param args:
+    :return:
+    '''
+    if args.attack == 'meta':
+        return f'{resroot}{args.dataset}/{args.dataset}_{args.attack}_{args.ptb_rate}_{method}_res.txt'
+    elif args.attack == 'random':
+        return f'{resroot}{args.dataset}/{args.dataset}_{args.attack}_{args.type}_{args.ptb_rate}_{method}_res.txt'
+    elif args.attack in  ['del','gflipm','gdelm','add']:
+        return f'{resroot}{args.dataset}/{args.dataset}_{args.attack}_{args.ptb_rate}_{method}_res.txt'
+    else:
+        return f'{resroot}{args.dataset}/{args.dataset}_{method}_res.txt'
 def main():
     '''
     Parsing command line parameters
@@ -125,24 +164,62 @@ def run(args):
     '''
     #加载
     # graph, features, target, seed_list, train_nodes, labels = load_data(args)
-    graph, features, target, seed_list, train_nodes, labels = load_citations(args)
+    graph, features, target, seed_list, train_nodes, labels,gtcomms = load_citations(args)
     subg = SubGraph(args, graph, features, target) #
     utils.tab_printer(args)
     trian_node = None
     label = None
+    seed_comm = None
     itr = 0
-    while itr < args.seed_cnt: #默认是20,遍历种子节点
+
+    F1 = 0.0
+    Pre = 0.0
+    Rec = 0.0
+    Using_time_A=0.0
+    Using_time_Avg=0.0
+    while itr < args.seed_cnt: #默认是20,遍历种子节点(这就是一个query的查询结果吗？）
         seed = random.randint(0, len(subg.graph.nodes) - 1)
         if (seed_list is not None):  # 用于控制是随机挑选种子，还是使用预定义的种子。
             seed = seed_list[itr]
             trian_node = train_nodes[itr]
             label = labels[itr]
+            seed_comm = gtcomms[itr]
         print("%d " % (itr) + 20 * '*')
         print("\nCurrent Seed Node is %d" % seed)
-        isOK = subg.community_search(seed, trian_node, label)
+        f1,pre,rec,using_time,method,isOK = subg.community_search(seed, trian_node, label,seed_comm)
+        F1 +=f1
+        Pre+=pre
+        Rec+=rec
+        Using_time_A+=using_time
         itr += isOK
-    #将运行结果存入文件
+    # 将运行结果存入文件
     subg.methods_result()
+
+    F1 = F1/args.seed_cnt
+    Pre = Pre/args.seed_cnt
+    Rec = Rec/args.seed_cnt
+    Using_time_Avg = Using_time_A/args.seed_cnt #平均每个种子节点的耗时
+    print(f'Test_set Avg：F1 = {F1}, Pre = {Pre}, Rec = {Rec}')
+    output = get_res_path('../results/ICSGNN/',args,method)
+    with open(output, 'a+', encoding='utf-8') as fh:
+        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # f"best_comm_threshold: {s_}, best_validation_Avg_F1: {f1_}\n"
+        line = (
+            f"args: {args}\n"
+            f"Using_time_Avg: {Using_time_Avg}\n"
+            f"Using_time: {Using_time_A}\n"
+            f"F1: {F1}\n"
+            f"Pre: {Pre}\n"
+            f"Rec: {Rec}\n"
+            # f"nmi_score: {nmi_score}\n"
+            # f"ari_score: {ari_score}\n"
+            # f"jac_score: {jac_score}\n"
+            f"current_time: {current_time}\n"
+            "----------------------------------------\n"
+        )
+        fh.write(line)
+        fh.close()
+
 
 
 def run_iteration(args):

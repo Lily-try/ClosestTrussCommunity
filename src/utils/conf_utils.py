@@ -37,7 +37,8 @@ class ModelConfig(metaclass=ABCMeta):
 
     @property
     def res_file(self):
-        return f'{RES_PATH}{self.model}/{self.dataset}/l{self.train_percentage:02d}/{self.f_prefix}.txt'
+        # return f'{RES_PATH}{self.model}/{self.dataset}/l{self.train_percentage:02d}/{self.f_prefix}.txt'
+        return f'{RES_PATH}{self.model}/{self.dataset}/l{self.train_percentage:.2f}/{self.f_prefix}.txt'
         # return f'{RES_PATH}{self.model}/{self.dataset}/{self.f_prefix}.txt'
 
     @property

@@ -137,7 +137,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=15, help='Random seed.')
     parser.add_argument('--root', type=str, default='../data', help='data store root')
-    parser.add_argument('--dataset', type=str, default='citeseer',
+    parser.add_argument('--dataset', type=str, default='cocs',
                         choices=['football', 'facebook_all', 'cora', 'cora_ml', 'citeseer', 'polblogs', 'pubmed'],
                         help='dataset')
     parser.add_argument('--ptb_rate', type=float, default=0.30, help='pertubation rate')
@@ -159,7 +159,17 @@ if __name__ == '__main__':
         print(type(ori_edge_index))
         # adj = nx.adjacency_matrix(graph)  # 转换为CSR格式的稀疏矩阵
         # labels = citation_loader.citation_target_reader(args.root, dataset)  # 读取标签,ndarray:(2708,1)
-    if dataset in ['dblp', 'amazon']:  # sanp数据集上的
+    elif args.dataset in ['cocs']:
+        graph = nx.Graph()
+        with open(f'{args.root}/{args.dataset}/{args.dataset}.edges', "r") as f:
+            for line in f:
+                node1, node2 = map(int, line.strip().split())
+                graph.add_edge(node1, node2)
+        num_nodes = graph.number_of_nodes()
+        ori_edge_index = np.array(list(graph.edges)).T  # 转置
+        ori_edge_index = torch.tensor(ori_edge_index, dtype=torch.long)
+        print(type(ori_edge_index))
+    elif dataset in ['dblp', 'amazon']:  # sanp数据集上的
         # edge, labels = snap_utils.load_snap(args.root, data_set='com_' + dataset, com_size=3)  # edge是list:1049866
         # 将edge转换成csr_matrix
         pass

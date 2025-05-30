@@ -114,11 +114,11 @@ def get_res_path(resroot,args):
     '''
     if args.attack == 'meta':
         return f'{resroot}{args.dataset}/{args.dataset}_{args.attack}_{args.ptb_rate}_{args.method}_res.txt'
-    elif args.attack == 'random':
-        return f'{resroot}{args.dataset}/{args.dataset}_{args.attack}_{args.type}_{args.ptb_rate}_{args.method}_res.txt'
+    # elif args.attack == 'random':
+    #     return f'{resroot}{args.dataset}/{args.dataset}_{args.attack}_{args.type}_{args.ptb_rate}_{args.method}_res.txt'
     # elif args.attack =='add':
     #     return f'{resroot}{args.dataset}_{args.aug}_{args.attack}_{args.noise_level}_{args.method}_res.txt'
-    elif args.attack in  ['del','gflipm','gdelm','add']:
+    elif args.attack in  ['del','gflipm','gdelm','add','random_remove','random_add','random_flip','gaddm','cdelm','cflipm','delm','flipm']:
         return f'{resroot}{args.dataset}/{args.dataset}_{args.attack}_{args.ptb_rate}_{args.method}_res.txt'
     else:
         return f'{resroot}{args.dataset}/{args.dataset}_{args.method}_res.txt'
@@ -133,11 +133,11 @@ def get_model_path(model_dir,args):
         os.makedirs(model_dir)
     if args.attack == 'meta':
         return f'{model_dir}{args.dataset}/{args.dataset}_{args.attack}_{args.ptb_rate}_{args.method}'
-    elif args.attack == 'random': #random attack
-        return f'{model_dir}{args.dataset}/{args.dataset}_{args.attack}_{args.type}_{args.ptb_rate}_{args.method}'
+    # elif args.attack == 'random': #random attack
+    #     return f'{model_dir}{args.dataset}/{args.dataset}_{args.attack}_{args.type}_{args.ptb_rate}_{args.method}'
     # elif args.attack =='add': #noisy graph
     #     return f'{model_dir}{args.dataset}_{args.attack}_{args.noise_level}_{args.method}.pkl'
-    elif args.attack in  ['del','gflipm','gdelm','add','gaddm']: #incomplete graph
+    elif args.attack in  ['random_add','random_remove','random_flip','del','add','gflipm','gdelm','gaddm','cdelm','cflipm','delm','flipm']: #incomplete graph
         return f'{model_dir}{args.dataset}/{args.dataset}_{args.attack}_{args.ptb_rate}_{args.method}'
     else: #不要攻击
         return f'{model_dir}{args.dataset}/{args.dataset}_{args.method}'

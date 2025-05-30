@@ -8,25 +8,28 @@ import  tarfile
 import scipy.sparse as sp
 from citation_loader import citation_graph_reader
 import json
+
+from load_utils import load_graph
+
 p = os.path.dirname(os.path.dirname((os.path.abspath('__file__'))))
 if p not in sys.path:
     sys.path.append(p)
 import os.path as osp
-def load_graph(args):
-    if args.attack == 'none':
-        if args.dataset in ['cora', 'citeseer', 'pubmed']:
-            graph = citation_graph_reader(args.root, args.dataset)  # 读取图
-    elif args.attack == 'random':
-        path = os.path.join(args.root, args.dataset, args.attack,
-                            f'{args.dataset}_{args.attack}_{args.type}_{args.ptb_rate}.npz')
-        adj_csr_matrix = sp.load_npz(path)
-        graph = nx.from_scipy_sparse_array(adj_csr_matrix)
-    elif args.attack in ['del', 'gflipm', 'gdelm', 'add']:
-        path = os.path.join(args.root, args.dataset, args.attack,
-                            f'{args.dataset}_{args.attack}_{args.ptb_rate}.npz')
-        adj_csr_matrix = sp.load_npz(path)
-        graph = nx.from_scipy_sparse_array(adj_csr_matrix)
-    return graph
+# def load_graph(args):
+#     if args.attack == 'none':
+#         if args.dataset in ['cora', 'citeseer', 'pubmed']:
+#             graph = citation_graph_reader(args.root, args.dataset)  # 读取图
+#     elif args.attack == 'random':
+#         path = os.path.join(args.root, args.dataset, args.attack,
+#                             f'{args.dataset}_{args.attack}_{args.type}_{args.ptb_rate}.npz')
+#         adj_csr_matrix = sp.load_npz(path)
+#         graph = nx.from_scipy_sparse_array(adj_csr_matrix)
+#     elif args.attack in ['del', 'gflipm', 'gdelm', 'add']:
+#         path = os.path.join(args.root, args.dataset, args.attack,
+#                             f'{args.dataset}_{args.attack}_{args.ptb_rate}.npz')
+#         adj_csr_matrix = sp.load_npz(path)
+#         graph = nx.from_scipy_sparse_array(adj_csr_matrix)
+#     return graph
 
 def load_comms(root,dataset):
     file_path = os.path.join(root, dataset, f'{dataset}.comms')
@@ -38,6 +41,17 @@ def load_comms(root,dataset):
             nodes = list(map(int, line.strip().split()))
             com_list.append(nodes)
     return com_list
+def find_node_community(com_list, query_node):
+    '''
+    从读取的comlist中可以查询任意一个节点所在的社区
+    :param com_list:
+    :param query_node:
+    :return:
+    '''
+    for community in com_list:
+        if query_node in community:
+            return community
+    return None  # 如果节点不在任何社区中
 
 
 def save_data_json(seed_list, train_node, labels,gtcomms, file_path):
@@ -70,12 +84,12 @@ def my_pre_com(args,subgraph_list=[400], train_ratio=0.02,seed_cnt=20,cmty_size=
     :param data_set:
     :param subgraph_list:子图大小
     :param train_ratio:训练数据比例
-    :param seed_cnt: 种子数量
+    :param seed_cnt: 种子数量  原文默认是20，我将其修改为500
     :param cmty_size: 社区大小
     '''
 
     #加载图数据
-    graph = load_graph(args)
+    graph,n_nodes = load_graph(args.root,args.dataset,args.attack,args.ptb_rate)
 
     #加载gt社区数据
     com_list = load_comms(args.root,args.dataset) #com_list[i]是索引为i的社区（节点列表）
@@ -85,8 +99,10 @@ def my_pre_com(args,subgraph_list=[400], train_ratio=0.02,seed_cnt=20,cmty_size=
 
     #遍历每一个子图大小，计算每个子图中用于训练的标签数量。
     for subgraph_size in subgraph_list:
-        #所需标签数目：子图大小*比例/2
-        numlabel = int(subgraph_size * train_ratio / 2)
+        #所需标签数目：子图大小*比例/2,这里算出来是4
+        #修改成固定为3个pos，3geneg
+        # numlabel = int(subgraph_size * train_ratio / 2)
+        numlabel = 3
         # 筛选出足够大的社区，以便有足够的节点用于训练和构建社区。
         ok_com_len=[(i,lens) for i,lens in com_len if lens>=(numlabel+cmty_size) ]
 
@@ -97,9 +113,9 @@ def my_pre_com(args,subgraph_list=[400], train_ratio=0.02,seed_cnt=20,cmty_size=
         gtcomms=[] #种子节点的gt社区
         error_seed=[] #存储无法满足训练需求的种子节点
         time=0
-        while len(seed_list)<seed_cnt: #循环直到收集足够的种子节点。
+        while len(seed_list)<seed_cnt: #循环直到收集足够的种子节点（其实就是查询节点）。
             time+=1
-            # 随机选择一个符合条件的社区作为种子社区
+            # 随机选择一个符合条件的社区索引作为种子社区
             seed_com_index=random.randint(0,len(ok_com_len)-1)
             seed_com=com_list[ok_com_len[seed_com_index][0]] #种子社区的节点列表
             #复制并随机打乱种子社区中的节点，选择一个未被使用的种子节点。
@@ -148,10 +164,12 @@ def my_pre_com(args,subgraph_list=[400], train_ratio=0.02,seed_cnt=20,cmty_size=
             negNodes=negNodes[:numlabel]
 
             # 将选定的种子节点、训练节点（正例和负例的组合）、标签添加到各自的列表中。
+            gt_comm = find_node_community(com_list,seed) #获取该种子节点所在的全部社区
             seed_list.append(seed)
             train_node.append(posNodes+negNodes)
             labels.append(seed_com_intersection)
-            gtcomms.append(seed_com)
+            # gtcomms.append(seed_com) #这是原本的只存了gtcomm
+            gtcomms.append(gt_comm) #现在我要的是全部
         #打印错误种子的数量和最终的种子列表。
         print('error num:',len(error_seed),"seed_list:",seed_list)
         print('type of labels:',type(labels))
@@ -159,7 +177,7 @@ def my_pre_com(args,subgraph_list=[400], train_ratio=0.02,seed_cnt=20,cmty_size=
     save_path =f'{args.root}/{args.dataset}/ics/{args.dataset}_{args.attack}_{args.ptb_rate}_data.json'
     save_data_json(seed_list,train_node,labels,gtcomms,save_path)
     # 返回边信息、种子列表(查询节点）、训练节点和标签，这些数据可用于进一步的图学习任务。
-    return seed_list,train_node,labels
+    return seed_list,train_node,labels,gtcomms
 
 
 def pre_com(data_set='com_dblp',subgraph_list=[400], train_ratio=0.02,seed_cnt=20,cmty_size=30):

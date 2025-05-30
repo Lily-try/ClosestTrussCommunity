@@ -11,7 +11,7 @@ class LocalCommunity(object):
         '''
             评估搜索到的社区的质量
             :param top_index   预测为正的索引
-            :param name:
+            :param name: 当前使用的方法
         '''
         y_pred = [0] * len(top_index) #预测的标签数组   top_index和target都是是<class 'list'>，是TP+FP
         y_true = [0] * len(top_index) #真实标签数组
@@ -43,6 +43,58 @@ class LocalCommunity(object):
             self.upgraph.cntmap[name]+=1
         print(name + " Precision={:.4f}  Precision without posnode={:.4f} using {:.4f}s".format(results[0],results[1],using_time))
         return results[0]
+
+    def my_evaluate_community(self,cnodes,top_index,seed_comm, name,using_time):
+        '''
+            评估搜索到的社区的质量
+            :param top_index   预测为正的索引
+            :param seed_comm 当前样本的实际社区
+            :param name: 当前使用的方法
+        '''
+        y_pred = [0] * len(top_index) #这30个节点的预测的标签数组   top_index和target都是是<class 'list'>，是TP+FP
+        y_true = [0] * len(top_index) #这30个节点的真实标签数组
+        ok = 0 #正确预测的样本数量
+        pos = 0 #top_index中的节点是否是正样本节点的计数
+        #获取当前这个子图中所有节点的真实标签
+        target = self.upgraph.sg_targets[0].cpu().detach().numpy().tolist()
+        for i in range(len(top_index)): #得到这30个节点的预测标签和真实标签
+            y_pred[i] = self.upgraph.sg_predLabels[top_index[i]]
+            y_true[i] = target[top_index[i]][0]
+            if top_index[i] in self.upgraph.sg_posNodes or top_index[i] in self.upgraph.posforrank:
+                pos+=1
+            if(y_true[i]==1):#TP（由于pos被提前给定了，所以会在减去pos）
+                ok+=1
+
+        lists = [x for x in cnodes if x in seed_comm]  # TP（将正类预测为正类）交集，同时在com_find和comm中出现的元素。
+        if len(lists) == 0:
+            print('都是0')
+            return 0.0, 0.0, 0.0
+        pre = (len(lists)-pos) * 1.0 / (len(cnodes)-pos)  # pre = TP/(TP+FP) = TP/comm_find
+        rec = len(lists) * 1.0 / len(seed_comm)  # recall = TP/(TP+FN) = TP/comm
+        # ACC= (TP+TN)/(TP+TN+FP+FN)
+        f1 = 2 * pre * rec / (pre + rec)  # F1=2*P*R/(P+R)
+        print(name + "Precision={:.4f},Recall{:.4f},F1-score{:.4f},using {:.4f}s".format(pre,rec,f1,using_time))
+
+
+        results= []
+        pre=0
+        #计算精度（未取出提前给定的pos_nodes的影响）results[0]
+        results.append(ok/len(top_index))
+        #消除了提前给定的pos_nodes的影响是result[1]
+        if (len(top_index) != pos):
+            pre=(ok-pos)/(len(top_index)-pos)
+        results.append(pre)
+        if name not in self.upgraph.methods:
+            self.upgraph.methods[name]= results
+            self.upgraph.time_map[name] =  using_time
+            self.upgraph.cntmap[name]=1
+        else:
+            self.upgraph.methods[name] =[self.upgraph.methods[name][i]+results[i] for i in range(len(results))]
+            self.upgraph.time_map[name] += using_time
+            self.upgraph.cntmap[name]+=1
+        # print(name + " Precision={:.4f}  Precision without posnode={:.4f} using {:.4f}s".format(results[0],results[1],using_time))
+        return f1,pre,rec,using_time,results[0]
+
 
     def my_eval(self,top_index,name,using_time):
         '''
@@ -103,7 +155,7 @@ class LocalCommunity(object):
             pos = pos + 1
 
         topk = [self.upgraph.mapper[node] for node in cnodes]
-        return topk #返回了前 TOPK_SIZE 个社区节点的索引列表。
+        return cnodes,topk #返回了前 TOPK_SIZE 个社区节点的索引列表。
 
 
     def locate_community_BFS(self, seed):
@@ -130,7 +182,7 @@ class LocalCommunity(object):
                         cnodes[pos1] = nb
                     pos1 = pos1 +1
         topk = [self.upgraph.mapper[node] for node in cnodes]
-        return topk
+        return cnodes,topk
 
 
     def locate_community_greedy(self, seed):
@@ -177,7 +229,10 @@ class LocalCommunity(object):
                 if maxValueIdx not in topkidx and len(topkidx)<self.upgraph.TOPK_SIZE:
                     topkidx.append(maxValueIdx)
         topk =[self.upgraph.mapper[cnodes[idx]] for idx in topkidx]
-        return topk
+        topk_raw_nodes = [cnodes[idx] for idx in topkidx]
+        # print('len tok_raw_nodes:',len(topk_raw_nodes))
+        # print('len nnodes:',len(cnodes))
+        return topk_raw_nodes,topk
 
 
     def locate_community_greedy_graph_prepath(self, seed):
@@ -226,7 +281,7 @@ class LocalCommunity(object):
                 if len(topkidx) < self.upgraph.TOPK_SIZE:
                     topkidx.append(x)
         topk = [self.upgraph.mapper[idx] for idx in topkidx]
-        return topk
+        return topkidx,topk
     def get_all_path(self, pgraph, topkidx,cnodes):
         '''
         Get the community to the other nodes' shortest paths

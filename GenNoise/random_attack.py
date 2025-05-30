@@ -21,9 +21,9 @@ from preprocess import txt_utils
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--seed', type=int, default=15, help='Random seed.')
-parser.add_argument('--dataset', type=str, default='citeseer', choices=['football','facebook_all','cora', 'cora_ml', 'citeseer', 'polblogs', 'pubmed'], help='dataset')
-parser.add_argument('--ptb_rate', type=float, default=0.30,  help='pertubation rate')
-parser.add_argument('--type', type=str, default='flip',  help=
+parser.add_argument('--dataset', type=str, default='cocs', choices=['cora','citeseer','cocs','football','facebook_all','cora_ml', 'polblogs', 'pubmed'], help='dataset')
+parser.add_argument('--ptb_rate', type=float, default=0.4,  help='pertubation rate')
+parser.add_argument('--type', type=str, default='add',  help=
 'attack type',choices=['add','remove','flip'])
 parser.add_argument('--root', type=str, default='../data',  help='data store root')
 #配置
@@ -54,8 +54,14 @@ if dataset in ['cora', 'citeseer', 'pubmed']:#引文网络，deeprobust本身就
 # if dataset in ['dblp','amazon']:#sanp数据集上的
 #     edge, labels = snap_utils.load_snap(args.root, data_set='com_' + dataset, com_size=3)  # edge是list:1049866
     #将edge转换成csr_matrix
-
-
+elif dataset in ['cocs']:
+    graphx = nx.Graph()
+    with open(f'{args.root}/{args.dataset}/{args.dataset}.edges', "r") as f:
+        for line in f:
+            node1, node2 = map(int, line.strip().split())
+            graphx.add_edge(node1, node2)
+    print(f'{args.dataset}:', graphx)
+    adj = nx.adjacency_matrix(graphx)  # 转换为CSR格式的稀疏矩阵
 #使用randomAttack进行攻击
 model = Random()
 
@@ -70,7 +76,7 @@ modified_adj = model.modified_adj
 #存储攻击后的adj
 modified_adj = modified_adj.tocsr() #lil_matraix:(2485,2485)}-->csr_matrix
 #存储成npz格式.
-path = os.path.join(args.root, args.dataset,'random')
+path = os.path.join(args.root, args.dataset,f'random_{args.type}')
 name=f'{args.dataset}_random_{args.type}_{args.ptb_rate}'
 sp.save_npz(os.path.join(path, name), modified_adj)
 

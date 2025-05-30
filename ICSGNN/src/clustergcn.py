@@ -87,12 +87,12 @@ class ClusterGCNTrainer(object):
         ### Train Phrase
 
         print("Training started")
-        epochs = trange(self.args.epochs, desc="Train Loss")
+        epochs = trange(self.args.epochs, desc="Train Loss") #使用 tqdm.trange 显示训练进度条（例如 100 epochs）。
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args.learning_rate)
         self.model.train()
         #for _ in range(self.args.epochs):
         for _ in epochs:
-            random.shuffle(self.clustering_machine.clusters)
+            random.shuffle(self.clustering_machine.clusters) #随机打乱 cluster 顺序，增加模型泛化能力。
             self.node_count_seen = 0
             self.accumulated_training_loss = 0
             for cluster in self.clustering_machine.clusters:
@@ -106,8 +106,8 @@ class ClusterGCNTrainer(object):
 
         ### Test Phrase
         self.model.eval()
-        self.predictions = []
-        self.targets = []
+        self.predictions = [] #Tensor (394,2)
+        self.targets = []  #target是Tensor"{394,)，全是0，1，，
         for cluster in self.clustering_machine.clusters:
             prediction, target = self.do_prediction(cluster)
             self.predictions.append(prediction.cpu().detach().numpy())

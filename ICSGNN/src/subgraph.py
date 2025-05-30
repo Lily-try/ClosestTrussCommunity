@@ -254,7 +254,7 @@ class SubGraph(object):
             self.sg_predProbs[x] = 1.0
             self.sg_predLabels[x] = 1
             if self.sg_targets[0][x] != 1.0:
-                print("wrong")
+                print("wrong")   #!!!!!!!!!!!!!!!!!!
         for x in self.sg_negNodes:
             self.sg_predProbs[x] = 0.0
             self.sg_predLabels[x] = 0
@@ -278,19 +278,20 @@ class SubGraph(object):
             self.sg_targets[cluster] = torch.LongTensor(self.sg_targets[cluster]).to(self.device)
 
 
-    def community_search(self, seed, trian_node, label):
+    def community_search(self, seed, trian_node, label,seed_comm):
 
         '''
         :param seed:初始节点，作为社区搜索的种子节点
         :param trian_node: 训练节点
         :param label: 节点标签
+        :param seed_comm:种子（查询）节点所在的社区
         分为使用排名损失和不使用排名损失的社区搜索
         GNN training subgraph, heuristic search community without/with rking loss
         '''
 
         self.rankloss = 0 #排名损失初始化为0
         #构建以seed为中心的局部候选子图，如果无法构建打印错误信息并退出
-        isOK = self.build_local_candidate(seed, trian_node, label)
+        isOK = self.build_local_candidate(seed, trian_node, label)  #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         if isOK == 0:#如果构建局部候选子图失败，则直接返回0退出。
             print("cannot build a local subgraph")
             return 0
@@ -300,6 +301,7 @@ class SubGraph(object):
             gcn_trainer = ClusterGCNTrainer(self.args, self) #用于GCN训练和测试
             begin_time = time.time()
             #返回节点权重nodeweight,预测标签predlabels，模型性能指标f1score
+            #这个子图中的预测的权重，标签，和计算的f1-score
             nodeweight, predlabels, f1score = gcn_trainer.train_test_community()
 
             #时间和计数统计
@@ -320,40 +322,56 @@ class SubGraph(object):
                 self.sg_predProbs[self.sg_test_nodes[0][i]] = nodeweight[i].item()
                 self.sg_predLabels[self.sg_test_nodes[0][i]] = predlabels[i].item()
             if(self.rankloss == 1):
-                prefix='With rking loss'
+                prefix='With_rking_loss'
             else:
-                prefix="Without rking loss"
+                prefix="Without_rking_loss"
 
             #进行启发式的社区搜索
             #1.只用BFS
+            # begin_time = time.time()
+            # cnodes,topk = lc.locate_community_BFS_only(seed)
+            # method = f'{prefix} BFS Only'
+            # f1,pre,rec,using_time,res0 = lc.my_evaluate_community(cnodes,topk,seed_comm,method, time.time() - begin_time)
+
+            #2.BFS Swap
+            # begin_time = time.time()
+            # cnodes,topk = lc.locate_community_BFS(seed)
+            # method = f'{prefix}_BSF_Swap'
+            # f1, pre, rec,using_time, res0 = lc.my_evaluate_community(cnodes,topk,seed_comm,method, time.time() - begin_time)
+
+            #3.Greedy T
+            # begin_time = time.time()
+            # cnodes,topk = lc.locate_community_greedy(seed)
+            # method = f'{prefix}_Greedy-T'
+            # f1,pre,rec,using_time,res0 = lc.my_evaluate_community(cnodes,topk,seed_comm,method,time.time() - begin_time)
+
+            #4. Greedy G
             begin_time = time.time()
-            topk = lc.locate_community_BFS_only(seed)
-            lc.evaluate_community(topk, prefix + " BSF Only",time.time() - begin_time)
+            cnodes,topk = lc.locate_community_greedy_graph_prepath(seed)
+            method = f'{prefix}_Greedy-G'
+            f1,pre,rec,using_time,res0 = lc.my_evaluate_community(cnodes,topk,seed_comm,method,time.time() - begin_time)
 
-
-            begin_time = time.time()
-            topk = lc.locate_community_BFS(seed)
-            lc.evaluate_community(topk, prefix + " BSF Swap", time.time() - begin_time)
-
-
-
-
-            begin_time = time.time()
-            topk = lc.locate_community_greedy(seed)
-            lc.evaluate_community(topk, prefix + " Greedy-T", time.time() - begin_time)
-
-
-
-            begin_time = time.time()
-            topk = lc.locate_community_greedy_graph_prepath(seed)
-            lc.evaluate_community(topk, prefix + " Greedy-G", time.time() - begin_time)
+            # begin_time = time.time()
+            # cnodes, topk = lc.locate_community_BFS_only(seed)
+            # lc.evaluate_community(topk, prefix + " BSF Only",time.time() - begin_time)
+            # begin_time = time.time()
+            # topk = lc.locate_community_BFS(seed)
+            # lc.evaluate_community(topk, prefix + " BSF Swap", time.time() - begin_time)
+            #
+            # begin_time = time.time()
+            # topk = lc.locate_community_greedy(seed)
+            # lc.evaluate_community(topk, prefix + " Greedy-T", time.time() - begin_time)
+            #
+            # begin_time = time.time()
+            # topk = lc.locate_community_greedy_graph_prepath(seed)
+            # lc.evaluate_community(topk, prefix + " Greedy-G", time.time() - begin_time)
 
             #获取正负样本对用于排名损失
             self.posforrank, self.negforrank = self.getPNpairs()
             self.rankloss = 1
 
-
-        return 1
+        #这个1是isOK
+        return f1,pre,rec,using_time,method,1
 
 
     def getPNpairs(self):
@@ -409,25 +427,25 @@ class SubGraph(object):
 
             prefix=str(round)+' Round'
             begin_time = time.time()
-            topk = lc.locate_community_BFS_only(seed)
+            cnodes,topk = lc.locate_community_BFS_only(seed)
             lc.evaluate_community(topk, prefix + " BSF Only",time.time() - begin_time)
 
 
             begin_time = time.time()
-            topk = lc.locate_community_BFS(seed)
+            cnodes,topk = lc.locate_community_BFS(seed)
             lc.evaluate_community(topk, prefix + " BSF Swap", time.time() - begin_time)
 
 
 
 
             begin_time = time.time()
-            topk = lc.locate_community_greedy(seed)
+            cnodes,topk = lc.locate_community_greedy(seed)
             lc.evaluate_community(topk, prefix + " Greedy-T", time.time() - begin_time)
 
 
 
             begin_time = time.time()
-            topk = lc.locate_community_greedy_graph_prepath(seed)
+            cnodes,topk = lc.locate_community_greedy_graph_prepath(seed)
             lc.evaluate_community(topk, prefix + " Greedy-G", time.time() - begin_time)
 
         return 1

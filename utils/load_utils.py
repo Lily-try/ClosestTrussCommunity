@@ -260,3 +260,58 @@ def load_data(args):
 
     return nodes_feats, train, val, test, node_in_dim, n_nodes, edge_index, edge_index_aug, adj_matrix, aa_tensor
 
+
+
+def load_graph(root,dataset,attack,ptb_rate=None,type=None):
+    '''
+    太多地方用到了，写一个公共的避免多个地方进行修改
+    目前缺少对facebook数据集的读取
+    :param args:
+    :return:
+    '''
+    if attack == 'none':  # 使用原始数据
+        if dataset in ['cora', 'pubmed', 'citeseer']:
+            graphx = citation_graph_reader(root, dataset)  # 读取图 nx格式的
+            print(graphx)
+            n_nodes = graphx.number_of_nodes()
+        elif dataset in ['cocs']:
+            graphx = nx.Graph()
+            with open(f'{root}/{dataset}/{dataset}.edges', "r") as f:
+                for line in f:
+                    node1, node2 = map(int, line.strip().split())
+                    graphx.add_edge(node1, node2)
+            print(f'{dataset}:', graphx)
+            n_nodes = graphx.number_of_nodes()
+        elif dataset.startswith('fb'):  #fbxxx的邻接矩阵
+            graphx = ego_utils.ego_graph_reader(root, dataset)
+            # graph_path = f'{args.root}/{args.dataset}/{args.dataset[2:]}.edges'
+            # graphx = efacebook_utils.read_edge_file(graph_path)
+            print(graphx)
+            n_nodes = graphx.number_of_nodes()
+        elif dataset in ['cora_stb','cora_gsr']:
+            path = os.path.join(root, dataset, attack,f'{dataset}_raw.npz')
+            print(f'加载图路径：{path}')
+            adj_csr_matrix = sp.load_npz(path)
+            graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
+            print(graphx)
+            n_nodes = graphx.number_of_nodes()
+    elif attack in ['add','random_remove','gaddm','del','random_add','gdelm','random_flip','gflipm','cdelm','cflipm','delm','flipm']:
+        path = os.path.join(root, dataset, attack,
+                            f'{dataset}_{attack}_{ptb_rate}.npz')
+        print(f'加载图路径：{path}')
+        adj_csr_matrix = sp.load_npz(path)
+        graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
+        print(graphx)
+        n_nodes = graphx.number_of_nodes()
+    else:
+        print('攻击类型不合法')
+
+        path = os.path.join(root, dataset, attack,
+                            f'{dataset}_{attack}_{ptb_rate}.npz')
+        print(f'加载图路径：{path}')
+        adj_csr_matrix = sp.load_npz(path)
+        graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
+        print(graphx)
+        n_nodes = graphx.number_of_nodes()
+
+    return graphx,n_nodes

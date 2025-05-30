@@ -22,7 +22,7 @@ from models.EmbLearner import EmbLearner
 from models.COCLE import COCLE
 from models.EmbLearnerWithWeights import EmbLearnerwithWeights
 from models.EmbLearnerWithoutHyper import EmbLearnerWithoutHyper
-from utils.load_utils import load_data, hypergraph_construction, loadQuerys
+from utils.load_utils import load_data, hypergraph_construction, loadQuerys, load_graph
 from utils.log_utils import get_logger, get_log_path
 from utils.val_utils import f1_score_, NMI_score, ARI_score, JAC_score, get_res_path, get_model_path, cal_pre
 
@@ -57,7 +57,7 @@ def validation(val,nodes_feats, model, edge_index, edge_index_aug):
             comm_find = list(comm_find)
             comm = set(comm)
             comm = list(comm)
-            f1, pre, rec = f1_score_(comm_find, comm)
+            f1, pre, rec = f1_score_(comm_find, comm) #计算当前样本的结果
             f1_x= f1_x+f1 #累加此样本的f1得分
         f1_x = f1_x/len(val) #总的f1得分除以验证集样本数量
         if f1_m<f1_x: #如果此社区阈值下得到的平均f1得分更高
@@ -132,33 +132,7 @@ def load_citations(args):
             nodes_feats = torch.from_numpy(nodes_feats)  # 转换成tensor
             node_in_dim = nodes_feats.shape[1]
     '''3.********************加载图数据******************************'''
-    if args.attack == 'none':  # 使用原始数据
-        if args.dataset in ['cora', 'pubmed', 'citeseer']:
-            graphx = citation_graph_reader(args.root, args.dataset)  # 读取图 nx格式的
-            print(graphx)
-            n_nodes = graphx.number_of_nodes()
-        elif args.dataset in ['cocs']:
-            graphx = nx.Graph()
-            with open(f'{args.root}/{args.dataset}/{args.dataset}.edges', "r") as f:
-                for line in f:
-                    node1,node2 = map(int,line.strip().split())
-                    graphx.add_edge(node1,node2)
-            print(f'{args.dataset}:',graphx)
-            n_nodes = graphx.number_of_nodes()
-    elif args.attack == 'random':
-        path = os.path.join(args.root, args.dataset, args.attack,
-                            f'{args.dataset}_{args.attack}_{args.type}_{args.ptb_rate}.npz')
-        adj_csr_matrix = sp.load_npz(path)
-        graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
-        print(graphx)
-        n_nodes = graphx.number_of_nodes()
-    elif args.attack in ['del','gflipm','gdelm','add']:
-        path = os.path.join(args.root, args.dataset, args.attack,
-                            f'{args.dataset}_{args.attack}_{args.ptb_rate}.npz')
-        adj_csr_matrix = sp.load_npz(path)
-        graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
-        print(graphx)
-        n_nodes = graphx.number_of_nodes()
+    graphx,n_nodes = load_graph(args.root,args.dataset,args.attack,args.ptb_rate)
 
     # 计算 Adamic-Adar 指数
     aa_indices = nx.adamic_adar_index(graphx) #计算aa指标

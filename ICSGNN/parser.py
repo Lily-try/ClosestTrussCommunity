@@ -7,9 +7,9 @@ def parameter_parser():
 
     # 控制攻击方法、攻击类型和攻击率
     parser.add_argument('--attack', type=str, default='none', choices=['none', 'random', 'meta_attack','add','del','gflipm','gdelm'])
+    parser.add_argument('--ptb_rate', type=float, default=0.30, help='pertubation rate')
     parser.add_argument('--type', type=str, default='add', help='random attack type', choices=['add', 'remove', 'flip'])
     parser.add_argument('--noise_level', type=int, default=2, choices=[1, 2, 3], help='noisy level')
-    parser.add_argument('--ptb_rate', type=float, default=0.30, help='pertubation rate')
 
     parser.add_argument("--epochs",
                         type = int,
@@ -29,11 +29,11 @@ def parameter_parser():
 	                    help = "Learning rate. Default is 0.01.")
     parser.add_argument("--dataset",
                         nargs="?",
-                        default='cora',
+                        default='cocs',
                         help="The name of data set. Default is cora.")
     parser.add_argument("--community-size",  #限制了找到的社区大小最多为30
                         type=int,
-                        default=30,
+                        default=50,
                         help="The size of final community. Default is 30.")
 
     parser.add_argument("--train-ratio",

@@ -112,8 +112,6 @@ def Preprocess_EgoFb(root, dataset):
 
     features = np.vstack((ego_feat, feat[:, 1:])) #逻辑：feat的第一行就是编号为0
 
-
-
     # 将特征归一化
     # features = fnormalize(features)
 
@@ -248,11 +246,6 @@ def save_processed_wfb_data(root, dataset, G, features, circles):
     nx.write_edgelist(G, edge_output, data=False)
 
     # 保存特征数据
-    # feature_output = f"{root}/{dataset}/{dataset}.feat"
-    # with open(feature_output, 'w') as f:
-    #     for i, feat in enumerate(features):
-    #         feat_str = " ".join(map(str, feat))
-    #         f.write(f"{i}\t{feat_str}\n")
     np.savetxt(f"{root}/{dataset}/{dataset}.feat", features, fmt='%d', delimiter=' ')
 
     # 保存圈子数据

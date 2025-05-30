@@ -1,8 +1,12 @@
 import os
+import random
+import shutil
 
 import networkx as nx
 import scipy.sparse as sp
 from citation_loader import citation_graph_reader
+from load_utils import load_graph
+
 '''
 生成运行传统的算法所需的数据集准备
 '''
@@ -17,10 +21,16 @@ def change_query(root,dataset,num=3,test_size=500,k=3,graphx=None):
     :param graphx:
     :return:
     '''
+    #测试集
     test_path = os.path.join(root,dataset, f'{dataset}_{num}_test_{test_size}.txt')
+
+    #将测试集作为comms文件，用于计算传统方法的准确度
+    target_path = os.path.join(root,dataset,'tra',f'{k}/comms.txt')
+    # 复制并重命名
+    shutil.copyfile(test_path, target_path)
+
     save_path = os.path.join(root,dataset,'tra', f'{k}/query1.txt')
     #获取图中所有节点
-    # valid_nodes = set(graphx.nodes()) #获取有效节点集合
     valid_nodes = {node for node in graphx.nodes() if graphx.degree(node) > 0}  # 只有度数大于零的节点
     # 打开原始文件进行读取
     with open(test_path, 'r', encoding='utf-8') as infile:
@@ -33,6 +43,107 @@ def change_query(root,dataset,num=3,test_size=500,k=3,graphx=None):
                 if int(q) in valid_nodes:
                     outfile.write(q + '\n')
     print(f"k-clique所需的信息 q 已存入{save_path}")
+
+def change_query_ctc(root,dataset,attack,ptb_rate,num=3,test_size=500,seed=32):
+    '''
+
+    :param root:
+    :param dataset:
+    :param num: 这个是原始查询中pos节点的个数，与命名有关
+    :param test_size:
+    :param k: 其实clique中用不着k
+    :param graphx:
+    :return:
+    '''
+
+    if attack != 'none':
+        target_dataset =f'{dataset}_{attack}_{ptb_rate}'
+    else:
+        target_dataset =dataset
+
+    target_dir = os.path.join("..", "ClosestTrussCommunity", "Dataset", target_dataset)
+    os.makedirs(target_dir, exist_ok=True)  # 确保目标目录存在
+    #图
+    graphx,n_nodes = load_graph(root,dataset,attack,ptb_rate)
+    # 判断是否存在自环并删除
+    self_loops = list(nx.selfloop_edges(graphx))  # 找出所有自环
+    if self_loops:
+        print(f"Found {len(self_loops)} self-loops, removing them...")
+        graphx.remove_edges_from(self_loops)
+    #将graphx转成txt存储，便于传统方法的调用
+    save_path = os.path.join(target_dir,f'graph.txt')
+    with open(save_path, "w") as f:
+        for edge in graphx.edges():
+            f.write(f"{edge[0]} {edge[1]}\n")
+    print(f"Edges saved to {save_path}")
+
+    #!!!在预处理的时候已经将节点编号都加1了
+    with open(save_path, 'r') as f_in:
+        edges = []
+        max_node = 0
+        for line in f_in:
+            u, v = map(int, line.strip().split())
+            u_new = u + 1
+            v_new = v + 1
+            edges.append((u_new, v_new))
+            current_max = max(u_new, v_new)
+            max_node = max(max_node, current_max)
+        num_nodes = max_node
+        num_edges = len(edges)
+    new_path = os.path.join(target_dir,f'{dataset}.txt')
+    with open(new_path, 'w') as f_out:
+        f_out.write(f"{num_nodes} {num_edges}\n")
+        for u, v in edges:
+            f_out.write(f"{u} {v}\n")
+    print(f'新编号后的数据已经存入:{new_path}')
+    #测试集"
+    test_path = os.path.join(root,dataset, f'{dataset}_{num}_test_{test_size}.txt')
+    #将测试集作为comms文件，用于计算传统方法的准确度
+
+    target_path = os.path.join(target_dir, "comms.txt")
+
+    # target_path = os.path.join(root,dataset,'tra',f'{k}/comms.txt')
+    # 复制并重命名
+    shutil.copyfile(test_path, target_path)
+    print(f"comms saved to {target_path}")
+
+    #获取图中有效点
+    valid_nodes = {node for node in graphx.nodes() if graphx.degree(node) > 0}  # 只有度数大于零的节点
+    random.seed(seed)
+    queries = []
+    # save_path = os.path.join(root, dataset,'tra',f'{k}/query.txt')
+    save_path = os.path.join(target_dir, 'query.txt')
+
+    with open(test_path, 'r', encoding='utf-8') as infile:
+        for line in infile:
+            if not line.strip():
+                continue
+            q_str, comm_str = line.strip().split(',')
+            q = int(q_str.strip())
+            if q not in valid_nodes:
+                continue #跳过度数不为0的
+            # queries.append([q]) #只留下这一行是让查询中只包含查询节点
+            comm = list(map(int, comm_str.strip().split()))
+            comm = [n for n in comm if n in valid_nodes]
+            if not comm or q not in comm:
+                continue
+            comm.remove(q)
+            ks = random.randint(1, min(5, len(comm))) #要抽取的个数，最初设置的最多20，感觉应该变少一点
+            if ks == 1:
+                sample =[q]
+            else:
+                sample = [q]
+                sample.extend(random.sample(comm, ks-1))
+            queries.append(sample)
+
+    with open(save_path, 'w') as f:
+        f.write(f"{len(queries)}\n")   #这里是看是不是还应该将查询中的节点编号都加1
+        for q in queries:
+            f.write(f"{len(q)} {' '.join(map(str, q))}\n")
+        # for q in queries: #测试是否需要将query中的节点编号也都加上1
+        #     q_plus_1 = [node + 1 for node in q]
+        #     f.write(f"{len(q_plus_1)} {' '.join(map(str, q_plus_1))}\n")
+    print(f"Converted {len(queries)} queries saved to {save_path}")
 
 def change_query_k(root,dataset,num=3,test_size=500,k=2, graphx=None):
     #truss和core需要的格式
@@ -78,68 +189,51 @@ def change_k_query(root,dataset,num=3,test_size=500,k=2, graphx=None):
                     outfile.write(f'{q} {k}\n')
     print(f"k-ecc所需要的query格式已存入：{save_path}")
 
-def change_graph_type(root,dataset,attack,k,ptb_rate=None,noise_level=None):
-    if attack == 'none':  # 使用原始数据
-        if dataset in ['cora', 'pubmed', 'citeseer']:
-            graphx = citation_graph_reader(root, dataset)  # 读取图 nx格式的
-            print(graphx)
-            n_nodes = graphx.number_of_nodes()
-    elif attack.startswith('random'):
-        path = os.path.join(root, dataset, 'random',
-                            f'{dataset}_{attack}_{ptb_rate}.npz')
-        adj_csr_matrix = sp.load_npz(path)
-        graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
-        print(graphx)
-        n_nodes = graphx.number_of_nodes()
-    elif attack =='add': #metaGC中自己注入随机噪声
-        path = os.path.join(root, dataset, attack,
-                            f'{dataset}_{attack}_{noise_level}.npz')
-        adj_csr_matrix = sp.load_npz(path)
-        graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
-        print(graphx)
-        n_nodes = graphx.number_of_nodes()
-    elif attack in ['del','gflipm']:
-        path = os.path.join(root,dataset,attack,
-                            f'{dataset}_{attack}_{ptb_rate}.npz')
-        adj_csr_matrix = sp.load_npz(path)
-        graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
-        print(graphx)
-        n_nodes = graphx.number_of_nodes()
+def change_graph_type(root,dataset,attack,ptb_rate=None,k=None):
+    #读取攻击图
+    graphx,n_nodes = load_graph(root,dataset,attack,ptb_rate)
+    # 判断是否存在自环并删除
+    self_loops = list(nx.selfloop_edges(graphx))  # 找出所有自环
+    if self_loops:
+        print(f"Found {len(self_loops)} self-loops, removing them...")
+        graphx.remove_edges_from(self_loops)
+
     #将graphx转成txt存储，便于传统方法的调用
     save_path = os.path.join(root,dataset,'tra',f'{k}/graph.txt')
     with open(save_path, "w") as f:
         for edge in graphx.edges():
             f.write(f"{edge[0]} {edge[1]}\n")
     print(f"Edges saved to {save_path}")
+
     return graphx
-def read_graph(root,dataset,attack,ptb_rate=None,noise_level=None):
-    if attack == 'none':  # 使用原始数据
-        if dataset in ['cora', 'pubmed', 'citeseer']:
-            graphx = citation_graph_reader(root, dataset)  # 读取图 nx格式的
-            print(graphx)
-            n_nodes = graphx.number_of_nodes()
-    elif attack.startswith('random'):
-        path = os.path.join(root, dataset, 'random',
-                            f'{dataset}_{attack}_{ptb_rate}.npz')
-        adj_csr_matrix = sp.load_npz(path)
-        graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
-        print(graphx)
-        n_nodes = graphx.number_of_nodes()
-    elif attack =='add': #metaGC中自己注入随机噪声
-        path = os.path.join(root, dataset, attack,
-                            f'{dataset}_{attack}_{noise_level}.npz')
-        adj_csr_matrix = sp.load_npz(path)
-        graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
-        print(graphx)
-        n_nodes = graphx.number_of_nodes()
-    elif attack in ['del','gflipm']:
-        path = os.path.join(root,dataset,attack,
-                            f'{dataset}_{attack}_{ptb_rate}.npz')
-        adj_csr_matrix = sp.load_npz(path)
-        graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
-        print(graphx)
-        n_nodes = graphx.number_of_nodes()
-    return graphx
+# def read_graph(root,dataset,attack,ptb_rate=None,noise_level=None):
+#     if attack == 'none':  # 使用原始数据
+#         if dataset in ['cora', 'pubmed', 'citeseer']:
+#             graphx = citation_graph_reader(root, dataset)  # 读取图 nx格式的
+#             print(graphx)
+#             n_nodes = graphx.number_of_nodes()
+#     elif attack.startswith('random'):
+#         path = os.path.join(root, dataset, 'random',
+#                             f'{dataset}_{attack}_{ptb_rate}.npz')
+#         adj_csr_matrix = sp.load_npz(path)
+#         graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
+#         print(graphx)
+#         n_nodes = graphx.number_of_nodes()
+#     elif attack =='add': #metaGC中自己注入随机噪声
+#         path = os.path.join(root, dataset, attack,
+#                             f'{dataset}_{attack}_{noise_level}.npz')
+#         adj_csr_matrix = sp.load_npz(path)
+#         graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
+#         print(graphx)
+#         n_nodes = graphx.number_of_nodes()
+#     elif attack in ['del','gflipm']:
+#         path = os.path.join(root,dataset,attack,
+#                             f'{dataset}_{attack}_{ptb_rate}.npz')
+#         adj_csr_matrix = sp.load_npz(path)
+#         graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
+#         print(graphx)
+#         n_nodes = graphx.number_of_nodes()
+#     return graphx
 
 def load_FB(root,dataset,attack,k,ptb_rate=None,noise_level=None):
     max = 0
@@ -204,19 +298,23 @@ def load_FB(root,dataset,attack,k,ptb_rate=None,noise_level=None):
 
 if __name__ == '__main__':
     root = '../data'
-    dataset = 'cora'
-    attack = 'gflipm'  #none,add,del,random_remove,random_flip,random_add,gflipm,gdelm
-    ptb_rate = 0.4 #除了add noise以外的都有这个参数
-    noise_level = 2 #如果是add noise则有这个
+    dataset = 'cora'  #cora,citeseer,cocs
+    attack = 'none'  #none,add,random_add,gaddm,del,random_remove,random_flip,gflipm,gdelm
+    ptb_rate = 0.3
     k =3  #生成所需要的k
-    if dataset.startswith('fb'):
-        graphx = load_FB(root,dataset,attack,k,ptb_rate=ptb_rate,noise_level=noise_level)
-    else: #将攻击图转换成txt文件的格式存入文件
-        graphx = change_graph_type(root, dataset, attack,k, ptb_rate=ptb_rate, noise_level=noise_level)
-    # graphx = read_graph(root, dataset, attack, ptb_rate=ptb_rate, noise_level=noise_level)
-    #k-clique
-    change_query(root,dataset,num=3,test_size=500,k=k,graphx=graphx)
-    # #truss和core需要的格式
-    change_query_k(root,dataset,num=3,test_size=500,k=k,graphx=graphx)
-    # #k-ecc
-    change_k_query(root,dataset,num=3,test_size=500,k=k,graphx=graphx)
+
+    # if dataset.startswith('fb'):
+    #     graphx = load_FB(root,dataset,attack,k,ptb_rate=ptb_rate)
+    # else: #将攻击图转换成txt文件的格式存入文件
+    #     graphx = change_graph_type(root, dataset, attack,ptb_rate=ptb_rate,k=k)
+    # # graphx = read_graph(root, dataset, attack, ptb_rate=ptb_rate, noise_level=noise_level)
+
+    #ctc
+    change_query_ctc(root,dataset,attack,ptb_rate,num=3,test_size=500)
+
+    # #k-clique
+    # change_query(root,dataset,num=3,test_size=500,k=k,graphx=graphx)
+    # # #truss和core需要的格式
+    # change_query_k(root,dataset,num=3,test_size=500,k=k,graphx=graphx)
+    # # #k-ecc
+    # change_k_query(root,dataset,num=3,test_size=500,k=k,graphx=graphx)

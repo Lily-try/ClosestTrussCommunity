@@ -126,6 +126,11 @@ class GSRConfig(ModelConfig):
                 'window_size': 13,
                 'walk_length': 100,
             },
+            'cocs': {
+                'num_walks': 10,
+                'window_size': 13,
+                'walk_length': 100,
+            },
             'blogcatalog': {
                 'num_walks': 12,
                 'window_size': 11,

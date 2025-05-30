@@ -103,10 +103,10 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=0, help='Random seed.')
     parser.add_argument('--root', type=str, default='../data', help='data store root')
     parser.add_argument('--dataset', type=str, default='cora',
-                        choices=['football', 'facebook_all', 'cora', 'cora_ml', 'citeseer', 'polblogs', 'pubmed'],
+                        choices=['cora','citeseer','cocs','football', 'facebook_all','cora_ml','polblogs', 'pubmed'],
                         help='dataset')
     # parser.add_argument('--noise_level', type=int, default=1, choices=[1, 2, 3], help='noisy level')
-    parser.add_argument('--ptb_rate', type=float, default=0.30, help='pertubation rate') #0.3,0.6,0.9对应123的等级
+    parser.add_argument('--ptb_rate', type=float, default=0.40, help='pertubation rate') #0.3,0.6,0.9对应123的等级
     # parser.add_argument('--type', type=str, default='add', help='attack type', choices=['add', 'remove', 'flip'])
 
     args = parser.parse_args()
@@ -140,11 +140,11 @@ if __name__ == '__main__':
 
     # 注入随机噪声
     modified_adj = add_noise_edges(adj, labels, args.ptb_rate, random_seed=0)
-
     # 存储修改后的邻接矩阵
     # 存储成npz格式.
     path = os.path.join(args.root, args.dataset, 'add')
     name = f'{args.dataset}_add_{args.ptb_rate}'
+    print(f'噪声数据已存入{path}/{name}.adj')
     sp.save_npz(os.path.join(path, name), modified_adj)
 
 

@@ -1,5 +1,6 @@
 import os.path as osp
 import sys
+from time import time
 
 sys.path.append((osp.abspath(osp.dirname(__file__)).split('src')[0] + 'src'))
 import os
@@ -16,7 +17,20 @@ def dgl_to_scipy_adj(g):
         shape=(num_nodes, num_nodes)
     )
     return adj
+def get_edge_set(graph):
+    """返回图的无向边集合（去重后）,用于记录修改的边"""
+    src, dst = graph.edges()
+    edges = set()
+    for u, v in zip(src.tolist(), dst.tolist()):
+        if u != v:
+            edges.add(tuple(sorted((u, v))))
+    return edges
 
+
+def log_time_to_file(log_path, label, duration):
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    with open(log_path, 'a') as f:
+        f.write(f"{label}: {duration:.4f} seconds\n")
 @time_logger
 def train_GSR(args):
     # ! Init Environment
@@ -36,22 +50,29 @@ def train_GSR(args):
     from models.GSR.trainer import FullBatchTrainer
     from models.GSR.trainGSR import train_GSR
     from models.GSR.PolyLRDecay import PolynomialLRDecay
+    from time import time
+
 
     # ! Config
     cf = GSRConfig(args)
     cf.device = th.device("cuda:0" if args.gpu >= 0 else "cpu")
 
-    # ！加载图
-    g, features, cf.n_feat, cf.n_class, labels, train_x, val_x, test_x = \
+    t_data_load = time()
+    # ！加载图 在utils/data_utils文件中
+    g, features, cf.n_feat, cf.n_class, labels, train_x, val_x, test_x,num_train_nodes = \
         preprocess_data(cf.root,cf.dataset,cf.attack,cf.ptb_rate, cf.train_percentage)
-
+    #存入预处理时间
+    print(f"[Time] Data loading and preprocessing: {time() - t_data_load:.2f} seconds")
+    t_data_load = time()-t_data_load
     feat = {'F': features, 'S': get_structural_feature(g, cf)}
     cf.feat_dim = {v: feat.shape[1] for v, feat in feat.items()}
     supervision = SimpleObject({'train_x': train_x, 'val_x': val_x, 'test_x': test_x, 'labels': labels})
+
+
+    t_train_start = time()
     # ! Train Init
     print(f'{cf}\nStart training..')
     p_model = GSR_pretrain(g, cf).to(cf.device)
-    # print(p_model)
     # ! Train Phase 1: Pretrain
     if cf.p_epochs > 0:
         # os.remove(cf.pretrain_model_ckpt)  # Debug Only
@@ -139,9 +160,12 @@ def train_GSR(args):
 
             th.save(p_model.state_dict(), cf.pretrain_model_ckpt)
 
-    # ! Train Phase 2: Graph Structure Refine
-    print(f'>>>> PHASE 2 - Graph Structure Refine <<<<< ')
+    train_time = time()-t_train_start
+    print(f'Training time',train_time)
 
+    # ! Train Phase 2: Graph Structure Refine 进行图结构细化
+    print(f'>>>> PHASE 2 - Graph Structure Refine <<<<< ')
+    t_refine_start = time()
     if cf.p_epochs <= 0 or cf.add_ratio + cf.rm_ratio == 0:
         print('Use original graph!')
         g_new = g
@@ -154,15 +178,28 @@ def train_GSR(args):
             dgl.save_graphs(cf.refined_graph_file, [g_new])
     #将优化后的图邻接矩阵存入文件
     adj_clean = dgl_to_scipy_adj(g_new)
-
     if cf.attack == 'none':
-        clean_path = f'{cf.root}/{cf.dataset}_gsr/{cf.attack}/{cf.dataset}_gsr_{cf.attack}.npz'
+        clean_path = f'{cf.root}/{cf.dataset}_gsr/{cf.attack}/{cf.dataset}_gsr_raw.npz'
     else:
         clean_path = f'{cf.root}/{cf.dataset}_gsr/{cf.attack}/{cf.dataset}_gsr_{cf.attack}_{cf.ptb_rate}.npz'
     os.makedirs(os.path.dirname(clean_path), exist_ok=True)
     sp.save_npz(clean_path, adj_clean)
 
+    # 计算边修改数量
+    old_edges = get_edge_set(g)
+    new_edges = get_edge_set(g_new)
+    added_edges = new_edges - old_edges  #添加的边
+    removed_edges = old_edges - new_edges #删除的边
+    num_added = len(added_edges)
+    num_removed = len(removed_edges)
+    num_modified = num_added + num_removed
+    print(f"[Graph Changes] Added edges: {num_added}, Removed edges: {num_removed}, Total changes: {num_modified}")
+
+    refine_time = time() - t_refine_start
+    print(f"[Time] Graph refinement: {refine_time:.2f} seconds")
+
     # ! Train Phase 3:  Node Classification
+    classification_start = time()
     f_model = GSR_finetune(cf).to(cf.device)
     print(f_model)
     # Copy parameters
@@ -180,6 +217,28 @@ def train_GSR(args):
     trainer.run()
     trainer.eval_and_save()
 
+    classification_time = time() - classification_start
+
+    # 存入时间
+    log_path = f'{cf.root}/{cf.dataset}_gsr/{cf.attack}/{cf.dataset}_gsr_{cf.attack}_{cf.ptb_rate}_time_stats.txt'
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    with open(log_path, 'a+', encoding='utf-8') as f:
+        line = (
+            f'load_time:{t_data_load}\n'
+            f'train_time:{train_time}\n'
+            f'refine_time:{refine_time}\n'
+            f'train+refine_time:{train_time + refine_time}\n'
+            f'classification_time:{classification_time}\n'
+            f'num_train_nodes:{num_train_nodes}\n'
+            f'train_size:{train_x.shape},val_size:{val_x.shape}, test_size{test_x.shape}\n'
+            f'added_edges:{num_added}\n'
+            f'removed_edges:{num_removed}\n'
+            f'add+removed_edges:{num_modified}\n'
+
+        )
+        f.write(line)
+        f.close()
+
     return cf
 
 
@@ -195,10 +254,10 @@ if __name__ == "__main__":
     parser.add_argument("-g", "--gpu", default=1, type=int, help="GPU id to use.")
     parser.add_argument('-r','--root', type=str, default='data')
     # parser.add_argument("-d", "--dataset", type=str, default=dataset)
-    parser.add_argument('-d','--dataset', type=str, default='cora',choices=['cora', 'cora_ml', 'citeseer', 'polblogs', 'pubmed'], help='dataset')
-    parser.add_argument('-a','--attack', type=str, default='del',choices=['none','gflipm', 'gdelm', 'gaddm','del','add', 'random', 'random_attack', 'mettack'],help='attack method')
+    parser.add_argument('-d','--dataset', type=str, default='cora',choices=['cora', 'cora_ml', 'citeseer', 'polblogs', 'pubmed','cocs','facebook','reddit'], help='dataset')
+    parser.add_argument('-a','--attack', type=str, default='del',choices=['none','random_add','random_remove','random_flip','flipm','cdelm','gflipm', 'gdelm', 'gaddm','del','add', 'random', 'random_attack', 'mettack'],help='attack method')
     parser.add_argument('-p','--ptb_rate', type=float, default=0.3, help='pertubation rate')
-    parser.add_argument("-t", "--train_percentage", default=0, type=int)
+    parser.add_argument("-t", "--train_percentage", default=0.1, type=float)  #用于训练的比例
     parser.add_argument("-e", "--early_stop", default=100, type=int)
     parser.add_argument("--epochs", default=1000, type=int)
     parser.add_argument("--seed", default=0)
@@ -208,6 +267,20 @@ if __name__ == "__main__":
     #     args.gpu = -1
     #     args.dataset = args.dataset if args.dataset != 'arxiv' else 'cora'
     # ! Train
-    train_GSR(args)
+    run_start = time()
+    cf = train_GSR(args)
+    running_time = time() - run_start
+    print('my running_time:', running_time)
+    log_path = f'{cf.root}/{cf.dataset}_gsr/{cf.attack}/{cf.dataset}_gsr_{cf.attack}_{cf.ptb_rate}_time_stats.txt'
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    with open(log_path, 'a+', encoding='utf-8') as f:
+        line = (
+            f'my_running_time:{running_time}\n'
+            '--------------------------------------------\n'
+            '\n'
+        )
+        f.write(line)
+        f.close()
+
 
 # python /home/zja/PyProject/MGSL/src/models/GSR/trainGSR.py -darxiv

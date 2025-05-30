@@ -475,7 +475,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--root',type=str, default='../data',help='dataset root path')
-    parser.add_argument('--dataset', type=str, default='cocs', help='dataset name',choices=['cora', 'citeseer', 'pubmed','cocs','football','facebook','facebook_all','fb107','fb686','fb348','fb414','fb1684','wfb107'])
+    parser.add_argument('--dataset', type=str, default='cora_gsr', help='dataset name',choices=['cora_stb','cora_gsr','cora', 'citeseer', 'pubmed','cocs','football','facebook','facebook_all','fb107','fb686','fb348','fb414','fb1684','wfb107'])
     #nq = train_size+val_size+test_size
     parser.add_argument('--nq',type=int,default=900,help='number of queries')
     parser.add_argument('--train_size',type=int,default=300,help='size of train set')
@@ -551,7 +551,7 @@ if __name__ == '__main__':
         queries = read_queries_from_file(f'{args.root}/{args.dataset}/{args.dataset}_all_queries.txt')  # 读取查询任务
         # 6. 将查询任务划分并写入文件。
         dataset_root = os.path.join(args.root, args.dataset)
-        train_path = os.path.join(dataset_root, f'{args.dataset}_{args.num}_train_{split_ratios[0]}.txt')
+        train_path = os.path.join(dataset_root, f'{args.dataset}_{args.num}_pos_train_{split_ratios[0]}.txt')
         val_path = os.path.join(dataset_root, f'{args.dataset}_{args.num}_val_{split_ratios[1]}.txt')
         test_path = os.path.join(dataset_root, f'{args.dataset}_{args.num}_test_{split_ratios[2]}.txt')
     elif args.type == 'trans': #选取部分社区用于生成查询
