@@ -90,7 +90,10 @@ def change_query_ctc(root,dataset,attack,ptb_rate,num=3,test_size=500,seed=32):
             max_node = max(max_node, current_max)
         num_nodes = max_node
         num_edges = len(edges)
-    new_path = os.path.join(target_dir,f'{dataset}.txt')
+    if attack != 'none':
+        new_path = os.path.join(target_dir,f'{dataset}_{attack}_{ptb_rate}.txt')
+    else:
+        new_path = os.path.join(target_dir,f'{dataset}.txt')
     with open(new_path, 'w') as f_out:
         f_out.write(f"{num_nodes} {num_edges}\n")
         for u, v in edges:
@@ -299,8 +302,8 @@ def load_FB(root,dataset,attack,k,ptb_rate=None,noise_level=None):
 if __name__ == '__main__':
     root = '../data'
     dataset = 'cora'  #cora,citeseer,cocs
-    attack = 'none'  #none,add,random_add,gaddm,del,random_remove,random_flip,gflipm,gdelm
-    ptb_rate = 0.3
+    attack = 'random_add'  #none,add,random_add,gaddm,del,random_remove,random_flip,gflipm,gdelm
+    ptb_rate = 0.4
     k =3  #生成所需要的k
 
     # if dataset.startswith('fb'):

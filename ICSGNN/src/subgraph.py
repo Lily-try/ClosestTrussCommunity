@@ -334,10 +334,10 @@ class SubGraph(object):
             # f1,pre,rec,using_time,res0 = lc.my_evaluate_community(cnodes,topk,seed_comm,method, time.time() - begin_time)
 
             #2.BFS Swap
-            # begin_time = time.time()
-            # cnodes,topk = lc.locate_community_BFS(seed)
-            # method = f'{prefix}_BSF_Swap'
-            # f1, pre, rec,using_time, res0 = lc.my_evaluate_community(cnodes,topk,seed_comm,method, time.time() - begin_time)
+            begin_time = time.time()
+            cnodes,topk = lc.locate_community_BFS(seed)
+            method = f'{prefix}_BSF_Swap'
+            f1, pre, rec,using_time, res0 = lc.my_evaluate_community(cnodes,topk,seed_comm,method, time.time() - begin_time)
 
             #3.Greedy T
             # begin_time = time.time()
@@ -346,10 +346,10 @@ class SubGraph(object):
             # f1,pre,rec,using_time,res0 = lc.my_evaluate_community(cnodes,topk,seed_comm,method,time.time() - begin_time)
 
             #4. Greedy G
-            begin_time = time.time()
-            cnodes,topk = lc.locate_community_greedy_graph_prepath(seed)
-            method = f'{prefix}_Greedy-G'
-            f1,pre,rec,using_time,res0 = lc.my_evaluate_community(cnodes,topk,seed_comm,method,time.time() - begin_time)
+            # begin_time = time.time()
+            # cnodes,topk = lc.locate_community_greedy_graph_prepath(seed)
+            # method = f'{prefix}_Greedy-G'
+            # f1,pre,rec,using_time,res0 = lc.my_evaluate_community(cnodes,topk,seed_comm,method,time.time() - begin_time)
 
             # begin_time = time.time()
             # cnodes, topk = lc.locate_community_BFS_only(seed)

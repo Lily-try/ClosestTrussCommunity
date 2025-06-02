@@ -88,8 +88,10 @@ def load_citations(args):
     #加载训练数据(seed,train_nodes(pos,neg))
     file_path = f'{args.root}/{args.dataset}/ics/{args.dataset}_{args.attack}_{args.ptb_rate}_data.json'
     if os.path.exists(file_path):#说明之前已经调用了对应的my_pre_com方法。
+        print('使用已有的训练数据')
         seed_list, train_nodes, labels, gtcomms = load_data_json(file_path)
     else: #新生成训练数据,并存储到json，这里我已经设定是3个正标签，3个负标签了
+        print('正在重新生成训练数据')
         seed_list, train_nodes, labels, gtcomms = my_pre_com(args, subgraph_list=[args.subgraph_size],train_ratio=args.train_ratio,seed_cnt=args.seed_cnt,cmty_size=args.community_size)
 
     return graph, features, target, seed_list, train_nodes, labels,gtcomms
@@ -103,7 +105,7 @@ def get_res_path(resroot,args,method):
         return f'{resroot}{args.dataset}/{args.dataset}_{args.attack}_{args.ptb_rate}_{method}_res.txt'
     elif args.attack == 'random':
         return f'{resroot}{args.dataset}/{args.dataset}_{args.attack}_{args.type}_{args.ptb_rate}_{method}_res.txt'
-    elif args.attack in  ['del','gflipm','gdelm','add']:
+    elif args.attack in  ['del','gflipm','gdelm','add','random_add','random_remove','random_flip','flipm','cdelm']:
         return f'{resroot}{args.dataset}/{args.dataset}_{args.attack}_{args.ptb_rate}_{method}_res.txt'
     else:
         return f'{resroot}{args.dataset}/{args.dataset}_{method}_res.txt'
@@ -184,9 +186,9 @@ def run(args):
             trian_node = train_nodes[itr]
             label = labels[itr]
             seed_comm = gtcomms[itr]
-        print("%d " % (itr) + 20 * '*')
-        print("\nCurrent Seed Node is %d" % seed)
-        f1,pre,rec,using_time,method,isOK = subg.community_search(seed, trian_node, label,seed_comm)
+        print(f"*********第{itr}个查询节点,查询点为*****************")
+        print("  Current Seed Node is %d" % seed)
+        f1,pre,rec,using_time,method,isOK = subg.community_search(seed, trian_node, label,seed_comm)  #对于一个节点的时间。
         F1 +=f1
         Pre+=pre
         Rec+=rec
@@ -206,6 +208,7 @@ def run(args):
         # f"best_comm_threshold: {s_}, best_validation_Avg_F1: {f1_}\n"
         line = (
             f"args: {args}\n"
+            f'Dataset:{args.dataset},Attack:{args.attack}, ptb_rate:{args.ptb_rate}\n'
             f"Using_time_Avg: {Using_time_Avg}\n"
             f"Using_time: {Using_time_A}\n"
             f"F1: {F1}\n"

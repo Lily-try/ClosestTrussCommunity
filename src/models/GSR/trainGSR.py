@@ -1,5 +1,6 @@
 import os.path as osp
 import sys
+from datetime import datetime
 from time import time
 
 sys.path.append((osp.abspath(osp.dirname(__file__)).split('src')[0] + 'src'))
@@ -270,11 +271,15 @@ if __name__ == "__main__":
     run_start = time()
     cf = train_GSR(args)
     running_time = time() - run_start
+
+    # 获取当前时间字符串
+    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print('my running_time:', running_time)
     log_path = f'{cf.root}/{cf.dataset}_gsr/{cf.attack}/{cf.dataset}_gsr_{cf.attack}_{cf.ptb_rate}_time_stats.txt'
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
     with open(log_path, 'a+', encoding='utf-8') as f:
         line = (
+            f'current_time:{current_time}\n'
             f'my_running_time:{running_time}\n'
             '--------------------------------------------\n'
             '\n'

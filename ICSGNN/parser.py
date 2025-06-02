@@ -6,7 +6,7 @@ def parameter_parser():
     parser.add_argument('--root', type=str, default='../data')
 
     # 控制攻击方法、攻击类型和攻击率
-    parser.add_argument('--attack', type=str, default='none', choices=['none', 'random', 'meta_attack','add','del','gflipm','gdelm'])
+    parser.add_argument('--attack', type=str, default='none', choices=['none', 'random_add','random_flip','random_remove','cdelm','flipm', 'meta_attack','add','del','gflipm','gdelm'])
     parser.add_argument('--ptb_rate', type=float, default=0.30, help='pertubation rate')
     parser.add_argument('--type', type=str, default='add', help='random attack type', choices=['add', 'remove', 'flip'])
     parser.add_argument('--noise_level', type=int, default=2, choices=[1, 2, 3], help='noisy level')
