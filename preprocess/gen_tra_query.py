@@ -10,7 +10,7 @@ from load_utils import load_graph
 '''
 生成运行传统的算法所需的数据集准备
 '''
-def change_query(root,dataset,num=3,test_size=500,k=3,graphx=None):
+def change_query(root,dataset,num=3,test_size=500,graphx=None):
     '''
 
     :param root:
@@ -21,30 +21,48 @@ def change_query(root,dataset,num=3,test_size=500,k=3,graphx=None):
     :param graphx:
     :return:
     '''
+    #准备graph
+    # 读取攻击图
+    graphx, n_nodes = load_graph(root, dataset, attack, ptb_rate)
+    # 判断是否存在自环并删除
+    self_loops = list(nx.selfloop_edges(graphx))  # 找出所有自环
+    if self_loops:
+        print(f"Found {len(self_loops)} self-loops, removing them...")
+        graphx.remove_edges_from(self_loops)
+
+    # 将graphx转成txt存储，便于传统方法的调用
+    save_path = os.path.join(root, dataset,f'graph.txt')
+    with open(save_path, "w") as f:
+        for edge in graphx.edges():
+            f.write(f"{edge[0]} {edge[1]}\n")
+    print(f"Edges saved to {save_path}")
+
     #测试集
     test_path = os.path.join(root,dataset, f'{dataset}_{num}_test_{test_size}.txt')
-
-    #将测试集作为comms文件，用于计算传统方法的准确度
-    target_path = os.path.join(root,dataset,'tra',f'{k}/comms.txt')
-    # 复制并重命名
-    shutil.copyfile(test_path, target_path)
-
-    save_path = os.path.join(root,dataset,'tra', f'{k}/query1.txt')
+    save_path = os.path.join(root,dataset, f'query1.txt')
     #获取图中所有节点
     valid_nodes = {node for node in graphx.nodes() if graphx.degree(node) > 0}  # 只有度数大于零的节点
     # 打开原始文件进行读取
+    ground_truths=[]
     with open(test_path, 'r', encoding='utf-8') as infile:
         # 打开新的文件用于写入
         with open(save_path, 'w', encoding='utf-8') as outfile:
             for line in infile:
                 # 按照逗号分隔每行，提取 q
-                q, _ = line.strip().split(',', 1)
+                q, comm = line.strip().split(',', 1)
                 # 只有在q节点是有效节点时才写入
                 if int(q) in valid_nodes:
                     outfile.write(q + '\n')
+                    ground_truths.append((q, comm))
     print(f"k-clique所需的信息 q 已存入{save_path}")
+    target_path = os.path.join(root, dataset,f'comms.txt')
+    with open(target_path, 'w') as f_comms:
+        for q, comm in ground_truths:
+            f_comms.write(f"{q}, {' '.join(map(str, comm))}\n")
+    print(f"Filtered comms saved to {target_path}")
 
-def change_query_ctc(root,dataset,attack,ptb_rate,num=3,test_size=500,seed=32):
+
+def change_query_ctc(root,dataset,attack,ptb_rate,num=3,test_size=500,seed=32,qnum=3,max_queries=500):
     '''
 
     :param root:
@@ -103,22 +121,23 @@ def change_query_ctc(root,dataset,attack,ptb_rate,num=3,test_size=500,seed=32):
     test_path = os.path.join(root,dataset, f'{dataset}_{num}_test_{test_size}.txt')
     #将测试集作为comms文件，用于计算传统方法的准确度
 
-    target_path = os.path.join(target_dir, "comms.txt")
+    # target_path = os.path.join(target_dir, "comms.txt")
 
     # target_path = os.path.join(root,dataset,'tra',f'{k}/comms.txt')
-    # 复制并重命名
-    shutil.copyfile(test_path, target_path)
-    print(f"comms saved to {target_path}")
-
+    # 复制并重命名。直接复制会包含无效查询
+    # shutil.copyfile(test_path, target_path)
+    # print(f"comms saved to {target_path}")
     #获取图中有效点
     valid_nodes = {node for node in graphx.nodes() if graphx.degree(node) > 0}  # 只有度数大于零的节点
     random.seed(seed)
     queries = []
     # save_path = os.path.join(root, dataset,'tra',f'{k}/query.txt')
     save_path = os.path.join(target_dir, 'query.txt')
-
+    ground_truths = []
     with open(test_path, 'r', encoding='utf-8') as infile:
         for line in infile:
+            if max_queries is not None and len(queries) >= max_queries:
+                break  # 控制最多生成的数量
             if not line.strip():
                 continue
             q_str, comm_str = line.strip().split(',')
@@ -131,13 +150,14 @@ def change_query_ctc(root,dataset,attack,ptb_rate,num=3,test_size=500,seed=32):
             if not comm or q not in comm:
                 continue
             comm.remove(q)
-            ks = random.randint(1, min(5, len(comm))) #要抽取的个数，最初设置的最多20，感觉应该变少一点
+            ks = random.randint(1, min(qnum, len(comm))) #要抽取的个数，
             if ks == 1:
                 sample =[q]
             else:
                 sample = [q]
                 sample.extend(random.sample(comm, ks-1))
             queries.append(sample)
+            ground_truths.append((q, comm))
 
     with open(save_path, 'w') as f:
         f.write(f"{len(queries)}\n")   #这里是看是不是还应该将查询中的节点编号都加1
@@ -147,6 +167,12 @@ def change_query_ctc(root,dataset,attack,ptb_rate,num=3,test_size=500,seed=32):
         #     q_plus_1 = [node + 1 for node in q]
         #     f.write(f"{len(q_plus_1)} {' '.join(map(str, q_plus_1))}\n")
     print(f"Converted {len(queries)} queries saved to {save_path}")
+
+    comms_path = os.path.join(target_dir, "comms.txt")
+    with open(comms_path, 'w') as f_comms:
+        for q, comm in ground_truths:
+            f_comms.write(f"{q}, {' '.join(map(str, comm))}\n")
+    print(f"Filtered comms saved to {comms_path}")
 
 def change_query_k(root,dataset,num=3,test_size=500,k=2, graphx=None):
     #truss和core需要的格式
@@ -301,8 +327,8 @@ def load_FB(root,dataset,attack,k,ptb_rate=None,noise_level=None):
 
 if __name__ == '__main__':
     root = '../data'
-    dataset = 'cora'  #cora,citeseer,cocs
-    attack = 'random_add'  #none,add,random_add,gaddm,del,random_remove,random_flip,gflipm,gdelm
+    dataset = 'cora'  #fb107，cora,citeseer,cocs
+    attack = 'none'  #none,add,random_add,gaddm,del,random_remove,random_flip,gflipm,gdelm
     ptb_rate = 0.4
     k =3  #生成所需要的k
 
@@ -310,14 +336,30 @@ if __name__ == '__main__':
     #     graphx = load_FB(root,dataset,attack,k,ptb_rate=ptb_rate)
     # else: #将攻击图转换成txt文件的格式存入文件
     #     graphx = change_graph_type(root, dataset, attack,ptb_rate=ptb_rate,k=k)
-    # # graphx = read_graph(root, dataset, attack, ptb_rate=ptb_rate, noise_level=noise_level)
 
-    #ctc
-    change_query_ctc(root,dataset,attack,ptb_rate,num=3,test_size=500)
+
+    #ctc-cora_stb，现在用的是5
+    # change_query_ctc(root,dataset,attack,ptb_rate,num=3,test_size=500,qnum=1,max_queries=500)
+    # change_query_ctc(root,'cora_stb','none',0.4,num=3,test_size=500,qnum=5,max_queries=500)
+    # change_query_ctc(root,'cora_stb','random_add',0.4,num=3,test_size=500,qnum=5,max_queries=500)
+    # change_query_ctc(root,'cora_stb','flipm',0.4,num=3,test_size=500,qnum=5,max_queries=500)
+    # change_query_ctc(root,'cora_stb','cdelm',0.4,num=3,test_size=500,qnum=5,max_queries=500)
+
+    #ctc-cora，现在用的是5
+    # change_query_ctc(root,dataset,attack,ptb_rate,num=3,test_size=500,qnum=1,max_queries=500)
+    # change_query_ctc(root,'cora','none',0.4,num=3,test_size=500,qnum=5,max_queries=500)
+    change_query_ctc(root,'cora','random_add',0.8,num=3,test_size=500,qnum=5,max_queries=500)
+    # change_query_ctc(root,'cora','flipm',0.4,num=3,test_size=500,qnum=5,max_queries=500)
+    # change_query_ctc(root,'cora','cdelm',0.4,num=3,test_size=500,qnum=5,max_queries=500)
+
+
+
+
 
     # #k-clique
-    # change_query(root,dataset,num=3,test_size=500,k=k,graphx=graphx)
+    # change_query(root,'cora',num=3,test_size=500)
     # # #truss和core需要的格式
+    # graphx,n_nodes = load_graph(root, dataset, attack,ptb_rate)
     # change_query_k(root,dataset,num=3,test_size=500,k=k,graphx=graphx)
     # # #k-ecc
     # change_k_query(root,dataset,num=3,test_size=500,k=k,graphx=graphx)

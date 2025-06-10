@@ -172,7 +172,10 @@ def load_graph(root,dataset,attack,ptb_rate=None,type=None):
     :param args:
     :return:
     '''
+    print(f"[load_graph] attack = {attack}")
+    print('在load graph中')
     if attack == 'none':  # 使用原始数据
+        print('在none里')
         if dataset in ['cora', 'pubmed', 'citeseer']:
             graphx = citation_graph_reader(root, dataset)  # 读取图 nx格式的
             print(graphx)
@@ -185,10 +188,15 @@ def load_graph(root,dataset,attack,ptb_rate=None,type=None):
                     graphx.add_edge(node1, node2)
             print(f'{dataset}:', graphx)
             n_nodes = graphx.number_of_nodes()
-        if dataset in ['cora_stb','cora_gsr s']:
+        elif dataset in ['cora_stb','cora_gsr']:
             path = os.path.join(root, dataset, attack,f'{dataset}_raw.npz')
             adj_csr_matrix = sp.load_npz(path)
             graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
+            print(graphx)
+            n_nodes = graphx.number_of_nodes()
+        elif dataset in ['fb107']:
+            print('成功进入这里')
+            graphx = nx.read_edgelist(f'{root}/{dataset}/{dataset}.edges', nodetype=int, data=False)
             print(graphx)
             n_nodes = graphx.number_of_nodes()
     elif attack in ['random_add','random_remove','random_flip','flipm','cdelm','cflipm','caddm','gaddm','gdelm','gflipm','del','add']:

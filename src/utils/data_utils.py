@@ -150,6 +150,9 @@ def load_features(root,dataset):
             # 每行特征转换为列表，然后堆叠为 ndarray
             nodes_feats = np.array([list(map(float, line.strip().split())) for line in f])
             nodes_feats = scipy.sparse.csr_matrix(nodes_feats)
+    elif dataset.startswith(('fb', 'wfb', 'fa')):  # 不加入中心节点
+        feats_array = np.loadtxt(f'{root}/{dataset}/{dataset}.feat', delimiter=' ', dtype=np.float32)
+        nodes_feats = scipy.sparse.csr_matrix(feats_array)
     else: #这个是源码自己使用的
         nodes_feats = scipy.sparse.load_npz('./ptb_graphs/%s_features.npz' % (dataset))
     print(f'{dataset} nodes_feats type:{type(nodes_feats)}, nodes_feats shape:{nodes_feats.shape}')
@@ -192,6 +195,7 @@ def load_adj(root,dataset,attack,ptb_rate): #torch.Tenso
     #     n_nodes = graphx.number_of_nodes()
     # else:
     #     raise ValueError(f'Unsupported attack type:{attack}')
+    print(f'{root}{dataset}{attack}{ptb_rate}')
     graphx,n_nodes = load_graph(root,dataset,attack,ptb_rate)
     #需要节点是从0开始的连续编号？
     #将其转换成DGLGraph

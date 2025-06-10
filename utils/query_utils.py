@@ -475,7 +475,8 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--root',type=str, default='../data',help='dataset root path')
-    parser.add_argument('--dataset', type=str, default='cora_gsr', help='dataset name',choices=['cora_stb','cora_gsr','cora', 'citeseer', 'pubmed','cocs','football','facebook','facebook_all','fb107','fb686','fb348','fb414','fb1684','wfb107'])
+    # ,choices=['fb107','wfb107','cora_stb','cora_gsr','cora','cocs_gsr','cocs_stb','citeseer', 'pubmed','cocs','football','facebook','facebook_all','fb107','fb686','fb348','fb414','fb1684','wfb107']
+    parser.add_argument('--dataset', type=str, default='photo', help='dataset name')
     #nq = train_size+val_size+test_size
     parser.add_argument('--nq',type=int,default=900,help='number of queries')
     parser.add_argument('--train_size',type=int,default=300,help='size of train set')
@@ -558,7 +559,7 @@ if __name__ == '__main__':
         pass
 
 
-    #进行数据划分
+    #进行数据划分.用于生成不同比例的 默认生成900个查询任务，然后划分为：300,100,500
     train_size, val_size, test_size = split_ratios
     assert sum(split_ratios) == len(queries), "Sum of split ratios must equal the total number of queries"
     # 划分任务

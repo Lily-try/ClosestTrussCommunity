@@ -21,9 +21,9 @@ from utils.load_utils import load_data, hypergraph_construction, loadQuerys, loa
 from utils.log_utils import get_logger, get_log_path
 from utils.cocle_val_utils import f1_score_, NMI_score, ARI_score, JAC_score, get_res_path, get_model_path, cal_pre
 import copy
+from torch_geometric.utils import to_dense_adj
 '''
-使用引文网络相关的数据集
-这个是coclep源码
+这个文件我是想看看那个阈值具体该怎么定义
 '''
 def validation(val,nodes_feats, model, edge_index, edge_index_aug):
     scorelists = []
@@ -266,6 +266,10 @@ def Community_Search(args,logger):
     #需要一个时间记录运行到最优的epoch后花费的时间
     #模型训练阶段
     train_start = datetime.datetime.now()  # 记录模型训练的开始时间
+
+    adj = to_dense_adj(edge_index, max_num_nodes=n_nodes)[0]  # shape: [N, N]
+    adj = adj.float().requires_grad_(True)  # 开启梯度追踪
+
     for epoch in range(args.epoch_n):
         embLearner.train()
         start = datetime.datetime.now()
@@ -283,6 +287,17 @@ def Community_Search(args,logger):
                 emb_optim.step()
                 emb_optim.zero_grad()
             i = i + 1
+
+            abs_grad = torch.abs(adj.grad)  # shape: [N, N]
+            # 构造 R_uv（结构置信度）: 举例为预测边概率，或者全部设为 0.5 占位
+            R = h @ h.T
+            R = (R - R.min()) / (R.max() - R.min())  # 可选：归一化到 [0,1]
+            # 按照你的公式构造
+            Pri = torch.zeros_like(adj)
+            Pri[adj == 1] = (1 - R[adj == 1]) * abs_grad[adj == 1] #删除边
+            Pri[adj == 0] = R[adj == 0] * abs_grad[adj == 0] #添加边
+
+
         epoch_time = (datetime.datetime.now() - start).seconds  # 运行每个epoch的时间
         logger.info(f'epoch_loss = {loss_b}, epoch = {epoch}, epoch_time = {epoch_time}')
         # 每轮训练完成后，记录验证集上的准确度，选择最优的结果

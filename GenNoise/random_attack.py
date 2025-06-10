@@ -21,8 +21,8 @@ from preprocess import txt_utils
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--seed', type=int, default=15, help='Random seed.')
-parser.add_argument('--dataset', type=str, default='cocs', choices=['cora','citeseer','cocs','football','facebook_all','cora_ml', 'polblogs', 'pubmed'], help='dataset')
-parser.add_argument('--ptb_rate', type=float, default=0.4,  help='pertubation rate')
+parser.add_argument('--dataset', type=str, default='fb107', choices=['fb107','cora','citeseer','cocs','football','facebook_all','cora_ml', 'polblogs', 'pubmed'], help='dataset')
+parser.add_argument('--ptb_rate', type=float, default=0.2,  help='pertubation rate')
 parser.add_argument('--type', type=str, default='add',  help=
 'attack type',choices=['add','remove','flip'])
 parser.add_argument('--root', type=str, default='../data',  help='data store root')
@@ -62,6 +62,12 @@ elif dataset in ['cocs']:
             graphx.add_edge(node1, node2)
     print(f'{args.dataset}:', graphx)
     adj = nx.adjacency_matrix(graphx)  # 转换为CSR格式的稀疏矩阵
+elif dataset.startswith(('wfb','fb')):
+    graphx = nx.read_edgelist(f'{args.root}/{args.dataset}/{args.dataset}.edges', nodetype=int, data=False)
+    print(graphx)
+    adj = nx.adjacency_matrix(graphx)  # 转换为CSR格式的稀疏矩阵
+
+
 #使用randomAttack进行攻击
 model = Random()
 

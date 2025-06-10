@@ -121,6 +121,11 @@ class GSRConfig(ModelConfig):
                 'window_size': 11,
                 'walk_length': 100,
             },
+            'fb107': {
+                'num_walks': 12,
+                'window_size': 11,
+                'walk_length': 100,
+            },
             'citeseer': {
                 'num_walks': 10,
                 'window_size': 13,

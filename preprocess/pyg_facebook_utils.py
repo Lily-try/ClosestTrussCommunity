@@ -25,7 +25,7 @@ def reindex_labels(encoded_labels):
     reindexed_labels = torch.tensor([label_map[label.item()] for label in encoded_labels], dtype=torch.long)
     return reindexed_labels, label_map
 
-def write_labels_to_file(encoded_labels, file_path="../data/facebook/facebook_comms.txt"):
+def write_labels_to_file(encoded_labels, file_path="../data/facebook/facebook.comms"):
     # Step 1: 重新编号
     reindexed_labels, label_map = reindex_labels(encoded_labels) #不再是one-hot的
     # Step 2: 分组节点并写入文件
@@ -49,7 +49,7 @@ def Preprocess_FB(root_name,dataset_name):
     edge_list_file = f'{root_name}/{dataset_name}/{dataset_name}.edges'
     feature_file = f'{root_name}/{dataset_name}/{dataset_name}.feat'
 
-    #保存边列表
+    #将edge_index保存为边列表
     edge_index = data.edge_index.numpy().T #转置为(source,target)格式
     np.savetxt(edge_list_file,edge_index,fmt='%d',delimiter=' ')
     print(f'Edges saved to {edge_list_file}')
@@ -70,19 +70,13 @@ if __name__ == '__main__':
     # 加载 Facebook 数据集
     root_name = '../data'
     dataset_name = 'facebook'
-
-
     labels = Preprocess_FB(root_name,dataset_name) #将数据集存入文件
-
     edge_list_file = f'{root_name}/{dataset_name}/{dataset_name}.edges'
     feature_file = f'{root_name}/{dataset_name}/{dataset_name}.feats'
     #读取处理后的数据
     graph = nx.read_edgelist(edge_list_file, nodetype=int, data=False)
-
     # 读取节点特
     features = np.loadtxt(feature_file, dtype=float, delimiter=' ')
-
-
     # 打印信息
     print(f"Number of nodes: {graph.number_of_nodes()}")
     print(f"Number of edges: {graph.number_of_edges()}")

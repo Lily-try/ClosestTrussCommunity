@@ -160,19 +160,31 @@ def flip_edge_degree_mode(p, mx):
     k = int(p * len(adj))
     top_k_vertex = heapq.nlargest(k, degree, degree.__getitem__)
 
+    total_add = 0
+    total_del = 0
+
     for i in top_k_vertex:
-        idx_ones = list(mx[i].nonzero()[0])  # Find the idx of non-zero values
-        if len(idx_ones) > mode:
-            idx_zeros = list(np.where(mx[i] == 0)[0])
+        idx_ones = list(mx[i].nonzero()[0])  # 非0，即当前节点的已有边
+        if len(idx_ones) > mode: #如果超过众数
+            idx_zeros = list(np.where(mx[i] == 0)[0]) #判断当前节点没有边的位置。
+            num_change = int(len(idx_ones) - mode-1)
+            if num_change <= 0:
+                continue
             idx_del = random.sample(idx_ones, int(len(idx_ones) - mode - 1))
-            idx_add = random.sample(idx_zeros, int(len(idx_ones) - mode - 1))
             for j in idx_del:
                 adj[i][j] = 0
                 adj[j][i] = 0
-            for j in idx_add:
-                adj[i][j] = 1
-                adj[j][i] = 1
-
+            total_del += len(idx_del)
+            #先判断能不能采样
+            if num_change <= len(idx_zeros):
+                idx_add = random.sample(idx_zeros, int(len(idx_ones) - mode - 1))
+                for j in idx_add:
+                    adj[i][j] = 1
+                    adj[j][i] = 1
+                total_add += len(idx_add)
+            else:
+                print(f"[WARNING] 节点 {i} 可加边不足：需要 {num_change}，可加 {len(idx_zeros)}，跳过")
+    print(f"[RESULT] 共删边 {total_del} 条，加边 {total_add} 条")
     return adj
 
 
@@ -808,6 +820,11 @@ def load_graph(root,dataset):
         print(f'{args.dataset}:', graphx)
         n_nodes = graphx.number_of_nodes()
         adj_matrix = nx.to_numpy_array(graphx, dtype=int)
+    elif dataset.startswith(('fb','wfb')):
+        graphx = nx.read_edgelist(f'{root}/{dataset}/{dataset}.edges', nodetype=int, data=False)
+        print(graphx)
+        n_nodes = graphx.number_of_nodes()
+        adj_matrix = nx.to_numpy_array(graphx, dtype=int)
     # 判断是否存在孤立节点
     row_sums = adj_matrix.sum(axis=1)
     isolated_nodes = np.where(row_sums == 0)[0]
@@ -846,11 +863,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=0, help='Random seed.')
     parser.add_argument('--root', type=str, default='../data', help='data store root')
-    parser.add_argument('--dataset', type=str, default='cocs',
-                        choices=['cora','citeseer','cocs','facebook_all', 'cora', 'cora_ml', 'citeseer', 'polblogs', 'pubmed'],
+    parser.add_argument('--dataset', type=str, default='fb107',
+                        choices=['fb107','cora','citeseer','cocs','facebook_all', 'cora', 'cora_ml', 'citeseer', 'polblogs', 'pubmed'],
                         help='dataset')
-    parser.add_argument('--method', type=int, default=8,choices=[6,12,18,4,10,2,8],help='noise type')
-    parser.add_argument('--ptb_rate', type=float, default=0.40, help='pertubation rate')
+    parser.add_argument('--method', type=int, default=4,choices=[6,12,18,4,10,2,8],help='noise type')
+    parser.add_argument('--ptb_rate', type=float, default=0.20, help='pertubation rate')
 
     args = parser.parse_args()
     print(f'读取{args.dataset}数据集')
@@ -873,5 +890,4 @@ if __name__ == '__main__':
     adj_csr_matrix = sp.load_npz(f'{save_path}/{save_name}')
     graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
     print('加入噪声后的邻接矩阵：',graphx)
-    # print(graphx)
     n_nodes = graphx.number_of_nodes()

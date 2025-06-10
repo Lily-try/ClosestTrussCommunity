@@ -162,7 +162,7 @@ def Preprocess_EgoFb(root, dataset):
 
     nx.write_edgelist(G,'{}/{}/{}.edges'.format(root,dataset,dataset),data=False)
 
-    with open('{}/{}/{}_comms.txt'.format(root,dataset,dataset), 'w',encoding='utf-8') as f:
+    with open('{}/{}/{}.comms'.format(root,dataset,dataset), 'w',encoding='utf-8') as f:
         circle_names = [circle_name for circle_name, _ in circles]
         f.write(' '.join(circle_names)+'\n')
         for mapped_members in mapped_circles:
@@ -186,7 +186,6 @@ def reindex_wfb_datas(root, dataset):
     with open(edge_file, 'r') as ef:
         for line in ef:
             source, target = map(int, line.strip().split())
-
             # 检查并分配新编号
             if source not in original_to_new_id: #确保每个原始编号只有一个映射，跳过已经映射过的节点
                 original_to_new_id[source] = current_id
@@ -241,6 +240,15 @@ def reindex_wfb_datas(root, dataset):
     return G, features, circles
 
 def save_processed_wfb_data(root, dataset, G, features, circles):
+    '''
+    保存不包含中心节点的数据
+    :param root:
+    :param dataset:
+    :param G:
+    :param features:
+    :param circles:
+    :return:
+    '''
     # 保存边数据
     edge_output = f"{root}/{dataset}/{dataset}.edges"
     nx.write_edgelist(G, edge_output, data=False)

@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <string>
 #include <cstdlib>
+//#include <chrono>
 #include "cliques.h"
 #include "querytree.h"
 #include "tree.h"
@@ -56,6 +57,7 @@ void CPM::runBaseline(string dir)
 		cerr<<"查询设置大小："<<QUERYNUM2<<",实际的查询集大小 "<<queryNodeSet[i].size()<<endl;
 		for(int j = 0; j < queryNodeSet[i].size(); ++j)
 		{
+
             int node = *(queryNodeSet[i][j].begin());
             std::cout << "Query Set " << i << ", Query " << j << ": Node = " << node << "\n";
 			char st[16];

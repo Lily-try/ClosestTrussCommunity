@@ -6,8 +6,8 @@ def parameter_parser():
     parser.add_argument('--root', type=str, default='../data')
 
     # 控制攻击方法、攻击类型和攻击率
-    parser.add_argument('--attack', type=str, default='none', choices=['none', 'random_add','random_flip','random_remove','cdelm','flipm', 'meta_attack','add','del','gflipm','gdelm'])
-    parser.add_argument('--ptb_rate', type=float, default=0.30, help='pertubation rate')
+    parser.add_argument('--attack', type=str, default='random_add', choices=['none', 'random_add','random_flip','random_remove','cdelm','flipm', 'meta_attack','add','del','gflipm','gdelm'])
+    parser.add_argument('--ptb_rate', type=float, default=0.20, help='pertubation rate')
     parser.add_argument('--type', type=str, default='add', help='random attack type', choices=['add', 'remove', 'flip'])
     parser.add_argument('--noise_level', type=int, default=2, choices=[1, 2, 3], help='noisy level')
 
@@ -29,11 +29,11 @@ def parameter_parser():
 	                    help = "Learning rate. Default is 0.01.")
     parser.add_argument("--dataset",
                         nargs="?",
-                        default='cocs',
+                        default='cora',
                         help="The name of data set. Default is cora.")
     parser.add_argument("--community-size",  #限制了找到的社区大小最多为30
                         type=int,
-                        default=50,
+                        default=30,
                         help="The size of final community. Default is 30.")
 
     parser.add_argument("--train-ratio",
@@ -52,7 +52,7 @@ def parameter_parser():
                         help="The size of hidden layers. Default is [16].")
     parser.add_argument("--seed-cnt",
                         type=int,
-                        default=20,
+                        default=500,
                         help="The number of random seeds. Default is 20."
                         )
     parser.add_argument("--iteration",

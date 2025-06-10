@@ -199,6 +199,25 @@ def train_GSR(args):
     refine_time = time() - t_refine_start
     print(f"[Time] Graph refinement: {refine_time:.2f} seconds")
 
+    # 存入时间
+    log_path = f'{cf.root}/{cf.dataset}_gsr/{cf.attack}/{cf.dataset}_gsr_{cf.attack}_{cf.ptb_rate}_time_stats.txt'
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    with open(log_path, 'a+', encoding='utf-8') as f:
+        line = (
+            f'load_time:{t_data_load}\n'
+            f'train_time:{train_time}\n'
+            f'refine_time:{refine_time}\n'
+            f'train+refine_time:{train_time + refine_time}\n'
+            f'num_train_nodes:{num_train_nodes}\n'
+            f'train_size:{train_x.shape},val_size:{val_x.shape}, test_size{test_x.shape}\n'
+            f'added_edges:{num_added}\n'
+            f'removed_edges:{num_removed}\n'
+            f'add+removed_edges:{num_modified}\n'
+        )
+        f.write(line)
+        f.close()
+
+
     # ! Train Phase 3:  Node Classification
     classification_start = time()
     f_model = GSR_finetune(cf).to(cf.device)
@@ -225,17 +244,7 @@ def train_GSR(args):
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
     with open(log_path, 'a+', encoding='utf-8') as f:
         line = (
-            f'load_time:{t_data_load}\n'
-            f'train_time:{train_time}\n'
-            f'refine_time:{refine_time}\n'
-            f'train+refine_time:{train_time + refine_time}\n'
             f'classification_time:{classification_time}\n'
-            f'num_train_nodes:{num_train_nodes}\n'
-            f'train_size:{train_x.shape},val_size:{val_x.shape}, test_size{test_x.shape}\n'
-            f'added_edges:{num_added}\n'
-            f'removed_edges:{num_removed}\n'
-            f'add+removed_edges:{num_modified}\n'
-
         )
         f.write(line)
         f.close()
@@ -255,7 +264,8 @@ if __name__ == "__main__":
     parser.add_argument("-g", "--gpu", default=1, type=int, help="GPU id to use.")
     parser.add_argument('-r','--root', type=str, default='data')
     # parser.add_argument("-d", "--dataset", type=str, default=dataset)
-    parser.add_argument('-d','--dataset', type=str, default='cora',choices=['cora', 'cora_ml', 'citeseer', 'polblogs', 'pubmed','cocs','facebook','reddit'], help='dataset')
+    #choices=['cora', 'cora_ml', 'citeseer', 'polblogs', 'pubmed','cocs','facebook','reddit'],
+    parser.add_argument('-d','--dataset', type=str, default='cora', help='dataset')
     parser.add_argument('-a','--attack', type=str, default='del',choices=['none','random_add','random_remove','random_flip','flipm','cdelm','gflipm', 'gdelm', 'gaddm','del','add', 'random', 'random_attack', 'mettack'],help='attack method')
     parser.add_argument('-p','--ptb_rate', type=float, default=0.3, help='pertubation rate')
     parser.add_argument("-t", "--train_percentage", default=0.1, type=float)  #用于训练的比例

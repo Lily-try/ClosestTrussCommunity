@@ -58,16 +58,49 @@ def load_citations(args):
             # 每行特征转换为列表，然后堆叠为 ndarray
             nodes_feats = np.array([list(map(float, line.strip().split())) for line in f])
             print('cocs的节点特征shape:',nodes_feats.shape)
+    elif args.dataset in ['fb107','wfb107']:  # 不加入中心节点
+        feats_array = np.loadtxt(f'{args.root}/{args.dataset}/{args.dataset}.feat', delimiter=' ', dtype=np.float32)
+        print(type(feats_array))
+        # nodes_feats = fnormalize(feats_array)  # 将特征进行归一化
+        nodes_feats = torch.from_numpy(feats_array)
+        node_in_dim = nodes_feats.shape[1]
+    elif args.dataset in ['cora_stb', 'cora_gsr']:
+        nodes_feats = citation_feature_reader(args.root, args.dataset[:-4])  # numpy.ndaaray:(2708,1433)
+        nodes_feats = torch.from_numpy(nodes_feats)  # 转换成tensor
+        node_in_dim = nodes_feats.shape[1]
+    elif args.dataset in ['fb107_gsr', 'fb107_stb']:
+        feats_array = np.loadtxt(f'{args.root}/{args.dataset[:-4]}/{args.dataset[:-4]}.feat', delimiter=' ',
+                                 dtype=np.float32)
+        print(type(feats_array))
+        # nodes_feats = fnormalize(feats_array)  # 将特征进行归一化
+        nodes_feats = torch.from_numpy(feats_array)
+        node_in_dim = nodes_feats.shape[1]
 
     #加载标签数据
     if args.dataset in ['cora', 'citeseer', 'pubmed']:
         target = citation_target_reader(args.root,args.dataset)  # 所有节点的标签
         target = target.reshape(-1, 1)
-    elif args.dataset in ['cocs']:  # 加载共同作者数据
+    elif args.dataset in ['cocs','fb107']:  # 加载共同作者数据
         with open(f'{args.root}/{args.dataset}/{args.dataset}.comms', 'r') as f:
             lines = f.readlines()
         lines = lines[1:]# 跳过第一行的社区编号（你可以用也可以不用，反正是从0开始按行编号）
-
+        # 统计最大节点ID以确定labels数组大小
+        max_node_id = -1
+        community_nodes = []
+        for line in lines:
+            nodes = list(map(int, line.strip().split()))
+            if nodes:
+                community_nodes.append(nodes)
+                max_node_id = max(max_node_id, max(nodes))
+        labels = np.zeros(max_node_id + 1, dtype=int)  #初始化label数组，默认是0
+        for comm_id, nodes in enumerate(community_nodes):
+            for node_id in nodes:
+                labels[node_id] = comm_id
+        target =labels.reshape(-1,1)  #id为索引位置的节点对应的标签（社区）编号。
+    elif args.dataset in ['cocs_stb','fb107_stb','fb107_gsr','cora_gsr','cora_stb']:  # 加载共同作者数据
+        with open(f'{args.root}/{args.dataset[:-4]}/{args.dataset[:-4]}.comms', 'r') as f:
+            lines = f.readlines()
+        lines = lines[1:]# 跳过第一行的社区编号（你可以用也可以不用，反正是从0开始按行编号）
         # 统计最大节点ID以确定labels数组大小
         max_node_id = -1
         community_nodes = []

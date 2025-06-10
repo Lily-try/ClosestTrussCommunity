@@ -93,6 +93,7 @@ def my_pre_com(args,subgraph_list=[400], train_ratio=0.02,seed_cnt=20,cmty_size=
 
     #加载gt社区数据
     com_list = load_comms(args.root,args.dataset) #com_list[i]是索引为i的社区（节点列表）
+    print('in my_pre_com，加载com_list成功')
     # 创建一个包含社区索引和社区大小的列表，并按照社区大小降序排序
     com_len=[(i,len(line)) for i,line in enumerate(com_list)]
     com_len.sort(key=lambda x:x[1],reverse=True)
@@ -105,7 +106,7 @@ def my_pre_com(args,subgraph_list=[400], train_ratio=0.02,seed_cnt=20,cmty_size=
         numlabel = 3
         # 筛选出足够大的社区，以便有足够的节点用于训练和构建社区。
         ok_com_len=[(i,lens) for i,lens in com_len if lens>=(numlabel+cmty_size) ]
-
+        print(f'ok_com_len:{ok_com_len}')
         # 初始化种子列表、训练节点列表、标签列表、错误种子列表和时间计数器。
         seed_list=[] #挑选的种子节点（查询节点）
         train_node=[] #存储用于训练的节点列表（包含正例和负例）

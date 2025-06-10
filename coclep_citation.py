@@ -149,6 +149,7 @@ def load_citations(args):
     '''********************1. 加载图数据******************************'''
     graphx,n_nodes = load_graph(args.root,args.dataset,args.attack,args.ptb_rate)
 
+    calAA_start = datetime.datetime.now()
     # 计算aa指标
     aa_indices = nx.adamic_adar_index(graphx)
     # 初始化 Adamic-Adar 矩阵
@@ -159,7 +160,7 @@ def load_citations(args):
         aa_matrix[v, u] = p  # 因为是无向图，所以也需要填充对称位置
     # 转换为张量
     aa_tensor = torch.tensor(aa_matrix, dtype=torch.float32)
-
+    logger.info(f'calAA_time = {datetime.datetime.now() - calAA_start}')
     src = []
     dst = []
     for id1, id2 in graphx.edges:
@@ -171,10 +172,11 @@ def load_citations(args):
     num_nodes = graphx.number_of_nodes()
     adj_matrix = csr_matrix(([1] * len(src), (src, dst)), shape=(num_nodes, num_nodes))
     # 构建超图
+    calhyper_start = datetime.datetime.now()
     edge_index = torch.tensor([src, dst])
     edge_index_aug, egde_attr = hypergraph_construction(edge_index, n_nodes, k=args.k)  # 构建超图
     edge_index = add_remaining_self_loops(edge_index, num_nodes=n_nodes)[0]
-
+    logger.info(f'CalHyper_time = {datetime.datetime.now() - calhyper_start}')
     '''2:************************加载训练数据**************************'''
     if args.dataset.startswith('stb_'):
         dataset = args.dataset[4:]
@@ -194,6 +196,12 @@ def load_citations(args):
     elif args.dataset in ['cora_stb','cora_gsr']:
         nodes_feats = citation_feature_reader(args.root, dataset[:-4])  # numpy.ndaaray:(2708,1433)
         nodes_feats = torch.from_numpy(nodes_feats)  # 转换成tensor
+        node_in_dim = nodes_feats.shape[1]
+    elif args.dataset in ['fb107_gsr','fb107_stb']:
+        feats_array = np.loadtxt(f'{args.root}/{args.dataset[:-4]}/{args.dataset[:-4]}.feat', delimiter=' ', dtype=np.float32)
+        print(type(feats_array))
+        # nodes_feats = fnormalize(feats_array)  # 将特征进行归一化
+        nodes_feats = torch.from_numpy(feats_array)
         node_in_dim = nodes_feats.shape[1]
     elif args.dataset in ['cocs']:
         with open(f'{args.root}/{args.dataset}/{dataset}.feats', "r") as f:

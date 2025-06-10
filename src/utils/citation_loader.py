@@ -184,10 +184,14 @@ def load_graph(root,dataset,attack,ptb_rate=None,type=None):
                     graphx.add_edge(node1, node2)
             print(f'{dataset}:', graphx)
             n_nodes = graphx.number_of_nodes()
-        if dataset in ['cora_stb','cora_gsr']:
+        elif dataset in ['cora_stb','cora_gsr']:
             path = os.path.join(root, dataset, attack,f'{dataset}_raw.npz')
             adj_csr_matrix = sp.load_npz(path)
             graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
+            print(graphx)
+            n_nodes = graphx.number_of_nodes()
+        elif dataset in ['fb107']:
+            graphx = nx.read_edgelist(f'{root}/{dataset}/{dataset}.edges', nodetype=int, data=False)
             print(graphx)
             n_nodes = graphx.number_of_nodes()
     elif attack in ['random_add','random_remove','random_flip','flipm','cdelm','gaddm','gdelm','gflipm','add','del']:

@@ -112,6 +112,8 @@ def get_res_path(resroot,args):
     :param args:
     :return:
     '''
+    if not os.path.exists(f'{resroot}{args.dataset}'):
+        os.makedirs(f'{resroot}{args.dataset}')
     if args.attack == 'meta':
         return f'{resroot}{args.dataset}/{args.dataset}_{args.attack}_{args.ptb_rate}_{args.method}_res.txt'
     # elif args.attack == 'random':
@@ -129,8 +131,8 @@ def get_model_path(model_dir,args):
     :param args:
     :return:
     '''
-    if not os.path.exists(model_dir):
-        os.makedirs(model_dir)
+    if not os.path.exists(f'{model_dir}{args.dataset}'):
+        os.makedirs(f'{model_dir}{args.dataset}')
     if args.attack == 'meta':
         return f'{model_dir}{args.dataset}/{args.dataset}_{args.attack}_{args.ptb_rate}_{args.method}'
     # elif args.attack == 'random': #random attack

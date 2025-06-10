@@ -274,7 +274,7 @@ def load_graph(root,dataset,attack,ptb_rate=None,type=None):
             graphx = citation_graph_reader(root, dataset)  # 读取图 nx格式的
             print(graphx)
             n_nodes = graphx.number_of_nodes()
-        elif dataset in ['cocs']:
+        elif dataset in ['cocs','photo']:
             graphx = nx.Graph()
             with open(f'{root}/{dataset}/{dataset}.edges', "r") as f:
                 for line in f:
@@ -282,10 +282,76 @@ def load_graph(root,dataset,attack,ptb_rate=None,type=None):
                     graphx.add_edge(node1, node2)
             print(f'{dataset}:', graphx)
             n_nodes = graphx.number_of_nodes()
-        elif dataset.startswith('fb'):  #fbxxx的邻接矩阵
-            graphx = ego_utils.ego_graph_reader(root, dataset)
+        elif dataset in ['facebook','fb107','wfb107']:  #fbxxx的邻接矩阵
+            print('加载facebook数据集图')
+            # graphx = ego_utils.ego_graph_reader(root, dataset)
             # graph_path = f'{args.root}/{args.dataset}/{args.dataset[2:]}.edges'
             # graphx = efacebook_utils.read_edge_file(graph_path)
+            graphx = nx.read_edgelist(f'{root}/{dataset}/{dataset}.edges', nodetype=int, data=False)
+            print(graphx)
+            n_nodes = graphx.number_of_nodes()
+        elif dataset in ['cora_stb','cora_gsr','fb107_stb','fb107_gsr']:
+            path = os.path.join(root, dataset, attack,f'{dataset}_raw.npz')
+            print(f'加载图路径：{path}')
+            adj_csr_matrix = sp.load_npz(path)
+            graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
+            print(graphx)
+            n_nodes = graphx.number_of_nodes()
+    elif attack in ['add','random_remove','gaddm','del','random_add','gdelm','random_flip','gflipm','cdelm','cflipm','delm','flipm']:
+        path = os.path.join(root, dataset, attack,
+                            f'{dataset}_{attack}_{ptb_rate}.npz')
+        print(f'加载图路径：{path}')
+        adj_csr_matrix = sp.load_npz(path)
+        graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
+        print(graphx)
+        n_nodes = graphx.number_of_nodes()
+    else:
+        print('攻击类型不合法')
+
+        path = os.path.join(root, dataset, attack,
+                            f'{dataset}_{attack}_{ptb_rate}.npz')
+        print(f'加载图路径：{path}')
+        adj_csr_matrix = sp.load_npz(path)
+        graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
+        print(graphx)
+        n_nodes = graphx.number_of_nodes()
+
+    return graphx,n_nodes
+
+
+def tongji(root,dataset,attack='none',ptb_rate=None,type=None):
+    '''
+    想要统计数据集的各个维度大小
+    :param root:
+    :param dataset:
+    :param attack:
+    :param ptb_rate:
+    :param type:
+    :return:
+    '''
+    if attack == 'none':  # 使用原始数据
+        if dataset in ['cora', 'pubmed', 'citeseer']:
+            graphx = citation_graph_reader(root, dataset)  # 读取图 nx格式的
+            print(graphx)
+            n_nodes = graphx.number_of_nodes()
+        elif dataset in ['cocs','photo']:
+            graphx = nx.Graph()
+            with open(f'{root}/{dataset}/{dataset}.edges', "r") as f:
+                for line in f:
+                    node1, node2 = map(int, line.strip().split())
+                    graphx.add_edge(node1, node2)
+            print(f'{dataset}:', graphx)
+            n_nodes = graphx.number_of_nodes()
+        elif dataset in ['facebook']:  #fbxxx的邻接矩阵
+            print('加载facebook数据集图')
+            # graphx = ego_utils.ego_graph_reader(root, dataset)
+            # graph_path = f'{args.root}/{args.dataset}/{args.dataset[2:]}.edges'
+            # graphx = efacebook_utils.read_edge_file(graph_path)
+            graphx = nx.read_edgelist(f'{root}/{dataset}/{dataset}.edges', nodetype=int, data=False)
+            print(graphx)
+            n_nodes = graphx.number_of_nodes()
+        elif dataset.startswith(('wfb','fb')):
+            graphx = nx.read_edgelist(f'{root}/{dataset}/{dataset}.edges', nodetype=int, data=False)
             print(graphx)
             n_nodes = graphx.number_of_nodes()
         elif dataset in ['cora_stb','cora_gsr']:
@@ -313,5 +379,58 @@ def load_graph(root,dataset,attack,ptb_rate=None,type=None):
         graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
         print(graphx)
         n_nodes = graphx.number_of_nodes()
+    print(f"节点数: {graphx.number_of_nodes()}, 边数: {graphx.number_of_edges()}")
 
-    return graphx,n_nodes
+    #!!加载节点特征
+    if dataset in ['cora','citeseer_stb','pubmed','citeseer']:
+        nodes_feats = citation_feature_reader(root, dataset)  # numpy.ndaaray:(2708,1433)
+        nodes_feats = torch.from_numpy(nodes_feats)  # 转换成tensor
+        node_in_dim = nodes_feats.shape[1]
+    elif dataset in ['cora_stb','cora_gsr']:
+        nodes_feats = citation_feature_reader(root, dataset[:-4])  # numpy.ndaaray:(2708,1433)
+        nodes_feats = torch.from_numpy(nodes_feats)  # 转换成tensor
+        node_in_dim = nodes_feats.shape[1]
+    elif dataset in ['fb107_gsr','fb107_stb']:
+        feats_array = np.loadtxt(f'{root}/{dataset[:-4]}/{dataset[:-4]}.feat', delimiter=' ', dtype=np.float32)
+        print(type(feats_array))
+        # nodes_feats = fnormalize(feats_array)  # 将特征进行归一化
+        nodes_feats = torch.from_numpy(feats_array)
+        node_in_dim = nodes_feats.shape[1]
+    elif dataset in ['cocs']:
+        with open(f'{root}/{dataset}/{dataset}.feats', "r") as f:
+            # 每行特征转换为列表，然后堆叠为 ndarray,注意要是float32
+            nodes_feats = np.array([list(map(float, line.strip().split())) for line in f],dtype=np.float32)
+            print(f'cocs的nodes_feats.dtype = {nodes_feats.dtype}')
+            print('cocs的节点特征shape:', nodes_feats.shape)
+            nodes_feats = torch.from_numpy(nodes_feats)  # 转换成tensor
+            node_in_dim = nodes_feats.shape[1]
+    elif dataset.startswith(('fb', 'wfb', 'fa')):  # 不加入中心节点
+        feats_array = np.loadtxt(f'{root}/{dataset}/{dataset}.feat', delimiter=' ', dtype=np.float32)
+        # nodes_feats = fnormalize(feats_array)  # 将特征进行归一化
+        nodes_feats = torch.from_numpy(feats_array)
+        node_in_dim = nodes_feats.shape[1]
+    elif dataset in ['facebook']:  # 读取pyg中的特征数据
+        feats_array = np.loadtxt(f'{root}/{dataset}/{dataset}.feat', dtype=float, delimiter=' ')
+        nodes_feats = torch.tensor(feats_array, dtype=torch.float32)
+        node_in_dim = nodes_feats.shape[1]
+    print(f"节点特征 shape: {nodes_feats.shape}，维度: {nodes_feats.shape[1]}，节点数: {nodes_feats.shape[0]}")
+
+    #加载社区信息
+    communities = {}
+    file_path = os.path.join(root, dataset, f'{dataset}.comms')
+    with open(file_path, 'r', encoding='utf-8') as f:
+        # 跳过第一行的标签列表
+        next(f)
+        label = 0
+        for line in f:
+            # 假设每行是由空格分隔的节点ID
+            node_ids = line.strip().split()
+            communities[label] = [int(node_id) for node_id in node_ids]
+            label += 1
+    print(f"社区数量: {len(communities)}")
+
+
+if __name__ == '__main__':
+    root = '../data'
+    dataset = 'cocs' #facebook,cocs,fb107
+    tongji(root, dataset)
