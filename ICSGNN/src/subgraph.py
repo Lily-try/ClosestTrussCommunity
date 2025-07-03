@@ -153,7 +153,9 @@ class SubGraph(object):
         self.TOPK_SIZE = int(self.args.community_size)
     def build_local_candidate(self, seed, trian_node, label):
         '''
-        构建以种子节点为中心的局部子图用于社区搜索。
+        seed:是查询节点
+        train_node：是posnodes and negnodes
+        label：是子图中节点的标签
         Build subgraphs
         '''
         allNodes = [] #存储局部子图的所有节点，初始只有seed
@@ -177,6 +179,14 @@ class SubGraph(object):
                         else:
                             negNodes.add(nb)
             pos = pos + 1
+
+        if label is not None:
+            for node in label:
+                if node not in allNodes:
+                    allNodes.append(node)
+                # --- 让 posNodes 也包含全部正例 ---
+                posNodes.add(node)
+
         posNodes=list(posNodes)
         negNodes=list(negNodes)
         print("The length of allNodes list is %d" % len(allNodes))
@@ -208,18 +218,26 @@ class SubGraph(object):
         self.sg_targets = {}
         #生成子图
         self.subgraph = nx.Graph()
+        self.subgraph.add_nodes_from(allNodes)  # ← 保证所有节点都有
         for i in range(len(allNodes)): #遍历allnodes间的边构建subgraph
             for j in range(i):
                 if ((allNodes[i], allNodes[j]) in self.graph.edges) or ((allNodes[j], allNodes[i]) in self.graph.edges):
                     self.subgraph.add_edge(allNodes[i], allNodes[j])
-
         print("size of nodes %d size of edges %d" % (len(self.subgraph.nodes), len(self.subgraph.edges)))
         #处理索引的映射
         self.sg_nodes[0] = [node for node in sorted(self.subgraph.nodes())]
         self.sg_predProbs = [0.0] * len(self.sg_nodes[0])
         self.sg_predLabels = [0] * len(self.sg_nodes[0])
         self.mapper = {node: i for i, node in enumerate(sorted(self.sg_nodes[0]))}
+        print("[Debug] 正例节点列表:", posNodes)
+        print("[Debug] 子图节点 allNodes 包含正例吗？", all(node in allNodes for node in posNodes))
+        print("[Debug] mapper keys:", list(self.mapper.keys())[:10], "...")
+        for node in posNodes:
+            if node not in self.mapper:
+                print("孤立节点", node, "度数", self.graph.degree(node))
+            assert node in self.mapper, f"[错误] 正例节点 {node} 不在 mapper 中"
         self.rmapper = {i: node for i, node in enumerate(sorted(self.sg_nodes[0]))}
+
         self.sg_edges[0] = [[self.mapper[edge[0]], self.mapper[edge[1]]] for edge in self.subgraph.edges()] + [
             [self.mapper[edge[1]], self.mapper[edge[0]]] for edge in self.subgraph.edges()]
         self.sg_posNodes = [self.mapper[node] for node in posNodes]
@@ -281,6 +299,7 @@ class SubGraph(object):
     def community_search(self, seed, trian_node, label,seed_comm):
 
         '''
+        对于当前查询节点seed的子图上找社区
         :param seed:初始节点，作为社区搜索的种子节点
         :param trian_node: 训练节点
         :param label: 节点标签
@@ -295,6 +314,8 @@ class SubGraph(object):
         if isOK == 0:#如果构建局部候选子图失败，则直接返回0退出。
             print("cannot build a local subgraph")
             return 0
+        else:
+            print('正确构建局部子图')
         for round in range(2): #迭代2轮循环，逐步优化社区搜索
             keepLayers = self.args.layers.copy() #备份当前层的GNN配置
 
@@ -346,7 +367,7 @@ class SubGraph(object):
             # f1,pre,rec,using_time,res0 = lc.my_evaluate_community(cnodes,topk,seed_comm,method,time.time() - begin_time)
 
             #4. Greedy G
-            begin_time = time.time()
+            begin_time = time.time() #cnodes是在原图中的节点编号，topk是在构建的子图上的节点编号
             cnodes,topk = lc.locate_community_greedy_graph_prepath(seed)
             method = f'{prefix}_Greedy-G'
             f1,pre,rec,using_time,res0 = lc.my_evaluate_community(cnodes,topk,seed_comm,method,time.time() - begin_time)
@@ -371,7 +392,7 @@ class SubGraph(object):
             self.rankloss = 1
 
         #这个1是isOK
-        return f1,pre,rec,using_time,method,1
+        return f1,pre,rec,using_time,method,1,cnodes
 
 
     def getPNpairs(self):

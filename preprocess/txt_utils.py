@@ -24,7 +24,7 @@ def truth2comms(input_file,output_file):
 
 # 读取facebook_full_truth.txt并重新组织内容写入facebook_full_comms.txt
 # input_file = '../data/facebook_all/facebook_all_truth.txt'
-# output_file = '../data/facebook_all/facebook_all_comms.txt'
+# output_file = '../data/facebook_all/facebook_all.comms'
 # truth2comms(input_file,output_file)
 
 #将邻接矩阵从大小到达排序

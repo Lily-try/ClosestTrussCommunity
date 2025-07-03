@@ -13,7 +13,6 @@ desc:
 import argparse
 import heapq
 import copy
-
 import networkx as nx
 import numpy as np
 import random
@@ -24,6 +23,8 @@ from networkx.convert_matrix import from_numpy_array
 import os
 import scipy.sparse as sp
 from collections import defaultdict
+
+from scipy.sparse import issparse, lil_matrix, csr_matrix
 
 from citation_loader import citation_graph_reader
 
@@ -79,42 +80,104 @@ def del_edge_degree_avg(p, mx):
 
 def del_edge_degree_mode(p, mx):
     '''
-    基于度的众数删除边。
+    基于度的众数删除边。  delm?
     :param p:
     :param mx:
     :return:
     '''
+    is_sparse = issparse(mx)
     adj = copy.deepcopy(mx)
-    G = from_numpy_array(adj)
+    # 构建图
+    if is_sparse:
+        G = nx.from_scipy_sparse_array(adj)
+    else:
+        G = nx.from_numpy_array(adj)
     ## Degree of each node
     degree = dict(G.degree)
-
     deg_values = np.array(list(degree.values()))
     counts = np.bincount(deg_values)
     mode = np.argmax(counts)
-    k = int(p * len(adj))
+    k = int(p * adj.shape[0]) if is_sparse else int(p * len(adj))
     top_k_vertex = heapq.nlargest(k, degree, degree.__getitem__)
 
-    for i in top_k_vertex:
-        idx = list(adj[i].nonzero()[0])  # Find the idx of non-zero values
-        if len(idx) > mode:
-            idx_del = random.sample(idx, int(len(idx) - mode))
-            for j in idx_del:
-                adj[i][j] = 0
-                adj[j][i] = 0
-        else:
-            continue
+    # 修改邻接矩阵
+    if is_sparse:
+        adj = adj.tolil()
+        for i in top_k_vertex:
+            idx = adj.rows[i]
+            if len(idx) > mode:
+                idx_del = random.sample(idx, len(idx) - mode)
+                for j in idx_del:
+                    adj[i, j] = 0
+                    adj[j, i] = 0
+            else:
+                continue
+        return adj.tocsr()
+    else:
+        for i in top_k_vertex:
+            idx = list(np.nonzero(adj[i])[0])
+            if len(idx) > mode:
+                idx_del = random.sample(idx, len(idx) - mode)
+                for j in idx_del:
+                    adj[i][j] = 0
+                    adj[j][i] = 0
+            else:
+                continue
+        return adj
 
-    return adj
 
-
+# def flip_edge_degree_avg(p, mx):
+#     '''
+#     翻转边（删除部分现有边，同时添加新边）以达到平均度。
+#     :param p:
+#     :param mx:
+#     :return:
+#     '''
+#     is_sparse = issparse(mx)
+#     adj = copy.deepcopy(mx)
+#     # 构建图
+#     if is_sparse:
+#         G = nx.from_scipy_sparse_array(adj)
+#     else:
+#         G = nx.from_numpy_array(adj)
+#
+#     ## Degree of each node
+#     degree = dict(G.degree)
+#     avg = sum(degree.values()) / len(adj)
+#     k = int(p * adj.shape[0]) if is_sparse else int(p * len(adj))
+#     top_k_vertex = heapq.nlargest(k, degree, degree.__getitem__)
+#
+#     if is_sparse:
+#         adj = adj.tolil()
+#         for i in top_k_vertex:
+#             idx_ones = adj.rows[i]  # Find the idx of non-zero values
+#             if len(idx_ones) > avg:
+#                 all_columns = set(range(adj.shape[1]))  # 所有列的索引，假设矩阵是adj.shape[1]列
+#                 idx_zeros = list(all_columns - idx_ones)  # 计算差集，得到零值的列索引
+#                 idx_del = random.sample(idx_ones, int(len(idx_ones) - avg - 1))
+#                 idx_add = random.sample(idx_zeros, int(len(idx_ones) - avg - 1))
+#                 for j in idx_del:
+#                     adj[i, j] = 0
+#                     adj[j, i] = 0
+#                 for j in idx_add:
+#                     adj[i, j] = 1
+#                     adj[j, i] = 1
+#         return adj.tocsr()
+#     else:
+#         for i in top_k_vertex:
+#             idx_ones = list(mx[i].nonzero()[0])  # Find the idx of non-zero values
+#             if len(idx_ones) > avg:
+#                 idx_zeros = list(np.where(mx[i] == 0)[0])
+#                 idx_del = random.sample(idx_ones, int(len(idx_ones) - avg - 1))
+#                 idx_add = random.sample(idx_zeros, int(len(idx_ones) - avg - 1))
+#                 for j in idx_del:
+#                     adj[i][j] = 0
+#                     adj[j][i] = 0
+#                 for j in idx_add:
+#                     adj[i][j] = 1
+#                     adj[j][i] = 1
+#     return adj
 def flip_edge_degree_avg(p, mx):
-    '''
-    翻转边（删除部分现有边，同时添加新边）以达到平均度。
-    :param p:
-    :param mx:
-    :return:
-    '''
     adj = copy.deepcopy(mx)
     G = from_numpy_array(adj)
     ## Degree of each node
@@ -140,6 +203,9 @@ def flip_edge_degree_avg(p, mx):
     return adj
 
 
+
+
+
 def flip_edge_degree_mode(p, mx):
     '''
     翻转边（删除部分现有边，同时添加新边）以达到众数度。
@@ -148,8 +214,14 @@ def flip_edge_degree_mode(p, mx):
     :return:
     '''
     print('in flip_edge_degree_mode method ')
+    is_sparse = issparse(mx)
     adj = copy.deepcopy(mx)
-    G = from_numpy_array(adj)
+    # 构建图
+    if is_sparse:
+        G = nx.from_scipy_sparse_array(adj)
+    else:
+        G = nx.from_numpy_array(adj)
+
     ## Degree of each node
     degree = dict(G.degree)
 
@@ -157,35 +229,67 @@ def flip_edge_degree_mode(p, mx):
     counts = np.bincount(deg_values)
     mode = np.argmax(counts)
 
-    k = int(p * len(adj))
+    k = int(p * adj.shape[0]) if is_sparse else int(p * len(adj))
     top_k_vertex = heapq.nlargest(k, degree, degree.__getitem__)
 
     total_add = 0
     total_del = 0
+    if is_sparse:
+        adj = adj.tolil()
+        for i in top_k_vertex:
+            idx_ones = adj.rows[i]
+            print(f'{i}点的非零列索引为{len(idx_ones)}')
+            if len(idx_ones) > mode:  # 如果边数超过众数
+                all_columns = set(range(adj.shape[1]))  # 所有列的索引，假设矩阵是adj.shape[1]列
+                idx_ones_set = set(idx_ones)  # 确保idx_ones是
+                idx_zeros = list(all_columns - idx_ones_set)  # 计算差集，得到零值的列索引
+                print(f'{i}点的零列索引为{len(idx_zeros)}')
+                num_change = int(len(idx_ones) - mode - 1)
+                if num_change <= 0:
+                    continue
+                idx_del = random.sample(idx_ones, int(len(idx_ones) - mode - 1))
+                # print(f'需要删除{len(idx_del)}条边')
+                for j in idx_del:
+                    adj[i,j] = 0
+                    adj[j,i] = 0
+                total_del += len(idx_del)
+                # 先判断能不能采样
+                if num_change <= len(idx_zeros):
+                    idx_add = random.sample(idx_zeros, int(len(idx_ones) - mode - 1))
+                    # print(f'需要添加{len(idx_add)}条边')
+                    for j in idx_add:
+                        adj[i,j] = 1
+                        adj[j,i] = 1
+                    total_add += len(idx_add)
+                else:
+                    print(f"[WARNING] 节点 {i} 可加边不足：需要 {num_change}，可加 {len(idx_zeros)}，跳过")
+        return adj.tocsr()
+    else:
+        for i in top_k_vertex:
+            idx_ones = list(mx[i].nonzero()[0]) # Find the idx of non-zero values
+            if len(idx_ones) > mode:  # 如果超过众数
+                idx_zeros = list(np.where(mx[i] == 0)[0])
+                num_change = int(len(idx_ones) - mode - 1)
+                if num_change <= 0:
+                    continue
+                idx_del = random.sample(idx_ones, int(len(idx_ones) - mode - 1))
+                for j in idx_del:
+                    adj[i][j] = 0
+                    adj[j][i] = 0
+                total_del += len(idx_del)
+                # 先判断能不能采样
+                if num_change <= len(idx_zeros):
+                    idx_add = random.sample(idx_zeros, int(len(idx_ones) - mode - 1))
+                    for j in idx_add:
+                        adj[i][j] = 1
+                        adj[j][i] = 1
+                    total_add += len(idx_add)
+                else:
+                    print(f"[WARNING] 节点 {i} 可加边不足：需要 {num_change}，可加 {len(idx_zeros)}，跳过")
+        print(f"[RESULT] 共删边 {total_del} 条，加边 {total_add} 条")
+        return adj
 
-    for i in top_k_vertex:
-        idx_ones = list(mx[i].nonzero()[0])  # 非0，即当前节点的已有边
-        if len(idx_ones) > mode: #如果超过众数
-            idx_zeros = list(np.where(mx[i] == 0)[0]) #判断当前节点没有边的位置。
-            num_change = int(len(idx_ones) - mode-1)
-            if num_change <= 0:
-                continue
-            idx_del = random.sample(idx_ones, int(len(idx_ones) - mode - 1))
-            for j in idx_del:
-                adj[i][j] = 0
-                adj[j][i] = 0
-            total_del += len(idx_del)
-            #先判断能不能采样
-            if num_change <= len(idx_zeros):
-                idx_add = random.sample(idx_zeros, int(len(idx_ones) - mode - 1))
-                for j in idx_add:
-                    adj[i][j] = 1
-                    adj[j][i] = 1
-                total_add += len(idx_add)
-            else:
-                print(f"[WARNING] 节点 {i} 可加边不足：需要 {num_change}，可加 {len(idx_zeros)}，跳过")
-    print(f"[RESULT] 共删边 {total_del} 条，加边 {total_add} 条")
-    return adj
+
 
 
 def add_edge_degree_avg(p, mx):
@@ -328,20 +432,46 @@ def del_edge_community_mode(p, mx):
     :return:
     '''
     print('按照众数删除社区内部边')
+    is_sparse = issparse(mx)
     adj = copy.deepcopy(mx)
-    G = from_numpy_array(adj)
-    num_del = sum(sum(mx)) - sum(sum(del_edge_degree_mode(p, mx)))
-    fixed_ratio = num_del / sum(sum(adj))  ##fix the original ratio
+    # 构建图
+    if is_sparse:
+        G = nx.from_scipy_sparse_array(adj)
+        total_edges = adj.sum()
+    else:
+        G = nx.from_numpy_array(adj)
+        total_edges = np.sum(adj)
+
+    #调用了按照度的众数删除边的方法（已经改为兼容版）
+    cleaned_adj = del_edge_degree_mode(p, mx)
+    # 计算需要删的边数
+    edges_after = cleaned_adj.sum() if is_sparse else np.sum(cleaned_adj)
+    num_del = total_edges - edges_after
+    # num_del = sum(sum(mx)) - sum(sum(del_edge_degree_mode(p, mx)))
+    # fixed_ratio = num_del / sum(sum(adj))  ##fix the original ratio
+    fixed_ratio = num_del / total_edges
+    # 获取社区边划分
     edge_partition = graph_edge_partition(G)[0]
+
+    # 删除部分社区内边
     for key in edge_partition.keys():
         for iter in range(int(fixed_ratio * len(edge_partition[key]))):
             edge_partition[key].pop()
-    new_adj = np.zeros((len(adj), len(adj)))
+    # new_adj = np.zeros((len(adj), len(adj)))
+    # 重建邻接矩阵（dense）
+    # 6. 构建新邻接矩阵（与原输入类型一致）
+    n = adj.shape[0]
+    if is_sparse:
+        new_adj = lil_matrix((n, n), dtype=int)
+    else:
+        new_adj = np.zeros((n, n), dtype=int)
+
     for key in edge_partition.keys():
-        for value in edge_partition[key]:
-            new_adj[value[0]][value[1]] = 1
-            new_adj[value[1]][value[0]] = 1
-    return new_adj
+        for u, v in edge_partition[key]:
+            new_adj[u, v] = 1
+            new_adj[v, u] = 1
+
+    return new_adj.tocsr() if is_sparse else new_adj
 
 
 def flip_edge_community_avg(p, mx):
@@ -811,7 +941,7 @@ def load_graph(root,dataset):
         print(graphx)
         n_nodes = graphx.number_of_nodes()
         adj_matrix = nx.to_numpy_array(graphx,dtype=int)
-    elif dataset in ['cocs']:
+    elif dataset in ['cocs','photo']:
         graphx = nx.Graph()
         with open(f'{args.root}/{args.dataset}/{args.dataset}.edges', "r") as f:
             for line in f:
@@ -820,7 +950,18 @@ def load_graph(root,dataset):
         print(f'{args.dataset}:', graphx)
         n_nodes = graphx.number_of_nodes()
         adj_matrix = nx.to_numpy_array(graphx, dtype=int)
-    elif dataset.startswith(('fb','wfb')):
+        # adj_matrix = nx.to_scipy_sparse_array(graphx, format='csr', dtype=int)
+    elif dataset in ['dblp','amazon']:
+        graphx = nx.Graph()
+        with open(f'{args.root}/{args.dataset}/{args.dataset}.edges', "r") as f:
+            for line in f:
+                node1, node2 = map(int, line.strip().split())
+                graphx.add_edge(node1, node2)
+        print(f'{args.dataset}:', graphx)
+        n_nodes = graphx.number_of_nodes()
+        # adj_matrix = nx.to_numpy_array(graphx, dtype=int) #内存会溢出？
+        adj_matrix = nx.to_scipy_sparse_array(graphx, format='csr', dtype=int)
+    elif dataset in ['facebook','fb107']:
         graphx = nx.read_edgelist(f'{root}/{dataset}/{dataset}.edges', nodetype=int, data=False)
         print(graphx)
         n_nodes = graphx.number_of_nodes()
@@ -863,11 +1004,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=0, help='Random seed.')
     parser.add_argument('--root', type=str, default='../data', help='data store root')
-    parser.add_argument('--dataset', type=str, default='fb107',
-                        choices=['fb107','cora','citeseer','cocs','facebook_all', 'cora', 'cora_ml', 'citeseer', 'polblogs', 'pubmed'],
-                        help='dataset')
+    #choices=['fb107','cora','citeseer','cocs','facebook_all', 'cora', 'cora_ml', 'citeseer', 'polblogs', 'pubmed'],
+    parser.add_argument('--dataset', type=str, default='amazon',help='dataset')
     parser.add_argument('--method', type=int, default=4,choices=[6,12,18,4,10,2,8],help='noise type')
-    parser.add_argument('--ptb_rate', type=float, default=0.20, help='pertubation rate')
+    parser.add_argument('--ptb_rate', type=float, default=0.40, help='pertubation rate')
 
     args = parser.parse_args()
     print(f'读取{args.dataset}数据集')
@@ -884,6 +1024,7 @@ if __name__ == '__main__':
     if not os.path.exists(save_path):
         os.makedirs(save_path)
     save_name = f'{args.dataset}_{name_dict[args.method]}_{args.ptb_rate}.npz'
+
     save_graph(modified_adj,f'{save_path}/{save_name}')
 
     #4读取加噪后的邻接矩阵

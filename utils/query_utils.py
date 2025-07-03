@@ -5,9 +5,9 @@ import numpy as np
 import networkx as nx
 import scipy.sparse as sp
 
-from citation_loader import citation_graph_reader
+from utils.citation_loader import citation_graph_reader
 from utils import citation_loader
-
+from utils.load_utils import load_graph
 '''
 已知gt社区文件
 生成查询任务并划分后存入文件中
@@ -168,7 +168,7 @@ def split_and_write_queries(queries, root,dataset, split_ratios=(150, 100, 100))
     # 写入测试集文件
     write_queries_to_file(test_queries, test_path)
 
-def gen_all_queries(root, dataset, communities, nq, np_min, np_max,threshold=0.8,constrain='True'):
+def gen_all_queries(root, dataset, communities, nq, np_min, np_max,threshold=0.8,constrain='True',valid_nodes=None):
     """
     根据range [np_min,np_max]从社区数据中生成全部的查询任务，存入对应的all_quries。
     :param communities: 从文件读取的社区字典。
@@ -211,6 +211,11 @@ def gen_all_queries(root, dataset, communities, nq, np_min, np_max,threshold=0.8
             continue  # 如果没有剩余节点，跳过此次循环
         q = np.random.choice(remaining_nodes)
 
+        if valid_nodes is not None:  # 验证是不是有效的
+            if q not in valid_nodes or any(p not in valid_nodes for p in pos_nodes) or any(
+                    c not in valid_nodes for c in community_nodes):
+                attempts += 1
+                continue
         if not constrain_bool or (q not in used_qs and pos_nodes not in used_pos_sets):
             queries.append((q, pos_nodes, community_nodes))
             if constrain_bool:
@@ -235,11 +240,16 @@ def gen_all_queries(root, dataset, communities, nq, np_min, np_max,threshold=0.8
             if not remaining_nodes:
                 continue
             q = np.random.choice(remaining_nodes)
+            if valid_nodes is not None: #避免选到孤立节点
+                if q not in valid_nodes or any(p not in valid_nodes for p in pos_nodes) or any(
+                        c not in valid_nodes for c in community_nodes):
+                    continue
             queries.append((q, pos_nodes, community_nodes))
 
     #将生成的所有查询任务存入文件
     querys_path = os.path.join(root, dataset, f'{dataset}_all_queries.txt')
     write_queries_to_file(queries,querys_path)
+    return queries
 
 def gen_all_queries_with_ratio(root, dataset, communities, nq, ratio,threshold=0.8,constrain='True'):
     """
@@ -476,13 +486,19 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--root',type=str, default='../data',help='dataset root path')
     # ,choices=['fb107','wfb107','cora_stb','cora_gsr','cora','cocs_gsr','cocs_stb','citeseer', 'pubmed','cocs','football','facebook','facebook_all','fb107','fb686','fb348','fb414','fb1684','wfb107']
-    parser.add_argument('--dataset', type=str, default='photo', help='dataset name')
+    parser.add_argument('--dataset', type=str, default='citeseer_gsr', help='dataset name')
     #nq = train_size+val_size+test_size
     parser.add_argument('--nq',type=int,default=900,help='number of queries')
     parser.add_argument('--train_size',type=int,default=300,help='size of train set')
     parser.add_argument('--val_size',type=int,default=100,help='size of validation set')
     parser.add_argument('--test_size',type=int,default=500,help='size of test set')
     parser.add_argument('--type',type=str,default='num',choices=['ratio','range','dis','num'],help='ways to gen query')
+
+    # 控制攻击方法、攻击类型和攻击率
+    #choices=['none','meta', 'random_remove', 'random_flip', 'random_add', 'meta_attack', 'add', 'del','gflipm', 'gdelm', 'gaddm', 'cdelm', 'cflipm', 'delm', 'flipm']
+    parser.add_argument('--attack', type=str, default='none')
+    parser.add_argument('--ptb_rate', type=float, default=0.40, help='pertubation rate')
+
     #if type = range
     parser.add_argument('--np_min',type=int,default=5,help='min number of queries，egofb:3; citations or facebook_all:5; ')   #如果是ego-facebook数据集，将这个参数设置为3。5太大了
     parser.add_argument('--np_max',type=int,default=30,help='max number of queries, egofb:10;citations or facebook_all:30; ')  #如果是ego-facebook数据集，将这个参数设置为10，30太大了。
@@ -547,7 +563,9 @@ if __name__ == '__main__':
         val_path = os.path.join(dataset_root, f'{args.dataset}_val_{split_ratios[1]}.txt')
         test_path = os.path.join(dataset_root, f'{args.dataset}_test_{split_ratios[2]}.txt')
     elif args.type == 'num':
-        gen_all_queries(args.root, args.dataset, communities, args.nq, args.num, args.num, args.threshold,args.constrain)  # 生成并存储全部的查询任务
+        graphx, n_nodes = load_graph(args.root, args.dataset, args.attack, args.ptb_rate)
+        valid_nodes = set(graphx.nodes())
+        gen_all_queries(args.root, args.dataset, communities, args.nq, args.num, args.num, args.threshold,args.constrain,valid_nodes)  # 生成并存储全部的查询任务
         # 5.读取生成的所有查询任务
         queries = read_queries_from_file(f'{args.root}/{args.dataset}/{args.dataset}_all_queries.txt')  # 读取查询任务
         # 6. 将查询任务划分并写入文件。

@@ -17,12 +17,12 @@ import argparse
 start_time = time.time()
 
 from utils import citation_loader
-from preprocess import txt_utils
+# from preprocess import txt_utils
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--seed', type=int, default=15, help='Random seed.')
-parser.add_argument('--dataset', type=str, default='fb107', choices=['fb107','cora','citeseer','cocs','football','facebook_all','cora_ml', 'polblogs', 'pubmed'], help='dataset')
-parser.add_argument('--ptb_rate', type=float, default=0.2,  help='pertubation rate')
+parser.add_argument('--dataset', type=str, default='amazon', choices=['fb107','cora','citeseer','cocs','football','facebook_all','cora_ml', 'polblogs', 'pubmed','facebook'], help='dataset')
+parser.add_argument('--ptb_rate', type=float, default=0.4,  help='pertubation rate')
 parser.add_argument('--type', type=str, default='add',  help=
 'attack type',choices=['add','remove','flip'])
 parser.add_argument('--root', type=str, default='../data',  help='data store root')
@@ -40,29 +40,25 @@ if args.cuda:
 #加载数据集,只需要csr_matricx:(2485,2485)}格式的邻接矩阵即可
 dataset = args.dataset
 if dataset in ['football','facebook_all']:
-   adj= txt_utils.load_txt_adj(args.root, dataset)
+    pass
+   # adj= txt_utils.load_txt_adj(args.root, dataset)
     # 读取features
     # 读取labels
-if dataset in ['cora', 'citeseer', 'pubmed']:#引文网络，deeprobust本身就有的
+elif dataset in ['cora', 'citeseer', 'pubmed']:#引文网络，deeprobust本身就有的
     #从pyg中的原始数据集中读取数据
     graph = citation_loader.citation_graph_reader(args.root, args.dataset)  # 读取图 nx格式的
     print(graph)
     adj = nx.adjacency_matrix(graph)  # 转换为CSR格式的稀疏矩阵
-    #弃用下面两行从deeprobust库中读取数据集的操作。
-    # data = Dataset(root=os.path.join('../data',dataset), name=args.dataset)
-    # adj, features, labels = data.adj, data.features, data.labels
-# if dataset in ['dblp','amazon']:#sanp数据集上的
-#     edge, labels = snap_utils.load_snap(args.root, data_set='com_' + dataset, com_size=3)  # edge是list:1049866
-    #将edge转换成csr_matrix
-elif dataset in ['cocs']:
+elif dataset in ['cocs', 'photo','dblp','amazon']:
     graphx = nx.Graph()
     with open(f'{args.root}/{args.dataset}/{args.dataset}.edges', "r") as f:
         for line in f:
             node1, node2 = map(int, line.strip().split())
             graphx.add_edge(node1, node2)
-    print(f'{args.dataset}:', graphx)
+    print(f'{dataset}:', graphx)
+    n_nodes = graphx.number_of_nodes()
     adj = nx.adjacency_matrix(graphx)  # 转换为CSR格式的稀疏矩阵
-elif dataset.startswith(('wfb','fb')):
+elif dataset in ['facebook','fb107']:
     graphx = nx.read_edgelist(f'{args.root}/{args.dataset}/{args.dataset}.edges', nodetype=int, data=False)
     print(graphx)
     adj = nx.adjacency_matrix(graphx)  # 转换为CSR格式的稀疏矩阵
@@ -72,6 +68,7 @@ elif dataset.startswith(('wfb','fb')):
 model = Random()
 
 n_perturbations = int(args.ptb_rate * (adj.sum()//2))
+print(f'要修改{n_perturbations}条边。。。')
 '''
 #!!!!注意事项，这里的attack的type默认是ADD攻击，即注入噪声边
 type: str,perturbation type. Could be 'add', 'remove' or 'flip'.
@@ -83,6 +80,7 @@ modified_adj = model.modified_adj
 modified_adj = modified_adj.tocsr() #lil_matraix:(2485,2485)}-->csr_matrix
 #存储成npz格式.
 path = os.path.join(args.root, args.dataset,f'random_{args.type}')
+os.makedirs(path, exist_ok=True)
 name=f'{args.dataset}_random_{args.type}_{args.ptb_rate}'
 sp.save_npz(os.path.join(path, name), modified_adj)
 

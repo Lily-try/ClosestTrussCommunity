@@ -149,7 +149,7 @@ def write_labels_to_file(root, dataset, labels):
     node_id_to_label = np.argsort(labels)
     sorted_labels = labels[node_id_to_label]
 
-    with open(os.path.join(root, dataset,f'{dataset}_comms.txt'), 'w',encoding='utf-8') as f:
+    with open(os.path.join(root, dataset,f'{dataset}.comms'), 'w',encoding='utf-8') as f:
         #在第一行写入唯一标签
         unique_labels =np.unique(labels)
         f.write(' '.join(map(str,unique_labels))+'\n')
@@ -180,7 +180,7 @@ def load_graph(root,dataset,attack,ptb_rate=None,type=None):
             graphx = citation_graph_reader(root, dataset)  # 读取图 nx格式的
             print(graphx)
             n_nodes = graphx.number_of_nodes()
-        elif dataset in ['cocs']:
+        elif dataset in ['cocs','photo','dblp','amazon']:
             graphx = nx.Graph()
             with open(f'{root}/{dataset}/{dataset}.edges', "r") as f:
                 for line in f:
@@ -194,14 +194,14 @@ def load_graph(root,dataset,attack,ptb_rate=None,type=None):
             graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
             print(graphx)
             n_nodes = graphx.number_of_nodes()
-        elif dataset in ['fb107']:
+        elif dataset in ['fb107','facebook','wfb107']:
             print('成功进入这里')
             graphx = nx.read_edgelist(f'{root}/{dataset}/{dataset}.edges', nodetype=int, data=False)
             print(graphx)
             n_nodes = graphx.number_of_nodes()
-    elif attack in ['random_add','random_remove','random_flip','flipm','cdelm','cflipm','caddm','gaddm','gdelm','gflipm','del','add']:
-        path = os.path.join(root, dataset, attack,
-                            f'{dataset}_{attack}_{ptb_rate}.npz')
+    elif attack in ['random_add','random_remove','random_flip','flipm','cdelm','cflipm','caddm','gaddm','gdelm','gflipm','del','add','meta']:
+        path = os.path.join(root, dataset, attack,f'{dataset}_{attack}_{ptb_rate}.npz')
+        print(f'准备从{path}加载数据')
         adj_csr_matrix = sp.load_npz(path)
         graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
         print(graphx)

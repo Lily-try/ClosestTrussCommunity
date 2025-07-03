@@ -41,7 +41,7 @@ def train_GSR(args):
     # Note that the assignment of GPU-ID must be specified before torch/dgl is imported.
     import torch as th
     import dgl
-    from utils.data_utils import preprocess_data
+    from utils.data_utils import preprocess_data,preprocess_fb
     from utils.early_stopper import EarlyStopping
 
     from models.GSR.GSR import GSR_pretrain, GSR_finetune, para_copy
@@ -60,8 +60,10 @@ def train_GSR(args):
 
     t_data_load = time()
     # ！加载图 在utils/data_utils文件中
-    g, features, cf.n_feat, cf.n_class, labels, train_x, val_x, test_x,num_train_nodes = \
-        preprocess_data(cf.root,cf.dataset,cf.attack,cf.ptb_rate, cf.train_percentage)
+    if cf.dataset in ['facebook','dblp']:
+        g, features, cf.n_feat, cf.n_class, labels, train_x, val_x, test_x,num_train_nodes = preprocess_fb(cf.root,cf.dataset,cf.attack,cf.ptb_rate, cf.train_percentage)
+    else:
+        g, features, cf.n_feat, cf.n_class, labels, train_x, val_x, test_x, num_train_nodes = preprocess_data(cf.root, cf.dataset, cf.attack, cf.ptb_rate, cf.train_percentage)
     #存入预处理时间
     print(f"[Time] Data loading and preprocessing: {time() - t_data_load:.2f} seconds")
     t_data_load = time()-t_data_load
@@ -184,6 +186,7 @@ def train_GSR(args):
     else:
         clean_path = f'{cf.root}/{cf.dataset}_gsr/{cf.attack}/{cf.dataset}_gsr_{cf.attack}_{cf.ptb_rate}.npz'
     os.makedirs(os.path.dirname(clean_path), exist_ok=True)
+    print(f'清理后的图已经成功存入{clean_path}中')
     sp.save_npz(clean_path, adj_clean)
 
     # 计算边修改数量
@@ -265,9 +268,10 @@ if __name__ == "__main__":
     parser.add_argument('-r','--root', type=str, default='data')
     # parser.add_argument("-d", "--dataset", type=str, default=dataset)
     #choices=['cora', 'cora_ml', 'citeseer', 'polblogs', 'pubmed','cocs','facebook','reddit'],
-    parser.add_argument('-d','--dataset', type=str, default='cora', help='dataset')
-    parser.add_argument('-a','--attack', type=str, default='del',choices=['none','random_add','random_remove','random_flip','flipm','cdelm','gflipm', 'gdelm', 'gaddm','del','add', 'random', 'random_attack', 'mettack'],help='attack method')
-    parser.add_argument('-p','--ptb_rate', type=float, default=0.3, help='pertubation rate')
+    parser.add_argument('-d','--dataset', type=str, default='facebook', help='dataset')
+    #,choices=['none','random_add','random_remove','random_flip','flipm','cdelm','gflipm', 'gdelm', 'gaddm','del','add', 'random', 'random_attack', 'mettack'],
+    parser.add_argument('-a','--attack', type=str, default='cdelm',help='attack method')
+    parser.add_argument('-p','--ptb_rate', type=float, default=0.4, help='pertubation rate')
     parser.add_argument("-t", "--train_percentage", default=0.1, type=float)  #用于训练的比例
     parser.add_argument("-e", "--early_stop", default=100, type=int)
     parser.add_argument("--epochs", default=1000, type=int)

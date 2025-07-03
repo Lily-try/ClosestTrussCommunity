@@ -92,9 +92,10 @@ if dataset in ['cora', 'citeseer', 'pubmed']:#使用存储库中提供的。
         labels = labels[lcc]
     idx_train,idx_val,idx_test = get_train_val_test(adj.shape[0], val_size=0.1, test_size=0.8, stratify=labels)
     idx_unlabeled = np.union1d(idx_val,idx_test)
-
 if dataset in ['dblp','amazon']:#这几个是有gt社区但没有节点特征的。
     edge, labels = snap_utils.load_snap(args.root, data_set='com_' + dataset, com_size=3)  # edge是list:1049866
+
+
     #将edge转换成csr_matrix
 if dataset in ['football']:
     print('Warning：样本太少，无法进行meta attack攻击')

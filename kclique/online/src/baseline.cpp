@@ -202,6 +202,7 @@ void naiveOATTree(MSTEDGE &edges, int n)
 
 void detectKCPC(CLIQUESET& cliques, int k)
 {
+    cout << "[DEBUG] Enter detectKCPC, k = " << k << ", cliques = " << cliques.size() << endl;
 	result.clear();
 	graph.clear();
 	//cout << "k: " << k << endl;
@@ -248,6 +249,10 @@ void detectKCPC(CLIQUESET& cliques, int k)
 			}
 		}
 	}
+	int edge_cnt = 0;
+    for (auto &v : graph) edge_cnt += v.size();
+    cout << "[DEBUG] Clique graph edges: " << edge_cnt / 2 << endl;
+
 
 	//pGraph();
 
@@ -269,7 +274,7 @@ void detectKCPC(CLIQUESET& cliques, int k)
 			}
 			int q_c = 1;
 			q[0] = i;
-			for (int j = 0; j < q_c; ++j)
+			for (int j = 0; j < q_c && q_c <= 2000; ++j)  //限制最大规模
 			{
 				int node = q[j];
 				int size = graph[node].size();
@@ -287,6 +292,9 @@ void detectKCPC(CLIQUESET& cliques, int k)
 					}
 				}
 			}
+			if (q_c > 2000) {
+                cout << "[WARN] BFS queue too large at clique " << i << ", aborted early." << endl;
+            }
 			result.emplace_back(r);
 		}
 	}
@@ -334,6 +342,11 @@ void baseline(std::set<int> &query, std::string dir)
 	cliques.clear();
 
 	int n = Cliques::getMaxCliques(dir, cliques, maximumCliqueSize);
+	if (cliques.size() > 50000) {
+    cout << "[WARN] Too many cliques: " << cliques.size() << ", truncating to 50000" << endl;
+    cliques.resize(50000);  // 只保留前 50000 个最大团
+    }
+
 	node2clique.clear();
 	node2clique.resize(n);
 	for (int i = 0; i < cliques.size(); ++i)
@@ -381,6 +394,7 @@ void baseline(std::set<int> &query, std::string dir)
 		fprintf( fout, "%d ", *it );
 	fclose(fout);
 	cout << "K=" << t << ",Number of Communities=" << cntCPC(query) << endl;
+	cout << "[DEBUG] node2clique[687].size() = " << node2clique[687].size() << endl;
 }
 
 bool isInKCPCCAG(int node, int connectivity, set<int> &query)

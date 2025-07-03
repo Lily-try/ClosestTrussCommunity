@@ -17,14 +17,13 @@ from models.EmbLearner import EmbLearner
 from models.COCLE import COCLE
 from models.EmbLearnerWithWeights import EmbLearnerwithWeights
 from models.EmbLearnerWithoutHyper import EmbLearnerWithoutHyper
-from utils.load_utils import load_data, hypergraph_construction, loadQuerys, load_graph
+from utils.load_utils import load_data, hypergraph_construction, load_graph
 from utils.log_utils import get_logger, get_log_path
 from utils.cocle_val_utils import f1_score_, NMI_score, ARI_score, JAC_score, get_res_path, get_model_path, cal_pre, \
-    get_comm_path
+    get_comm_path, get_Size_res_path
 import copy
 '''
-使用引文网络相关的数据集
-这个是coclep源码
+测试训练集验证集测试集大小的影响
 '''
 def validation(val,nodes_feats, model, edge_index, edge_index_aug):
     scorelists = []
@@ -64,6 +63,103 @@ def validation(val,nodes_feats, model, edge_index, edge_index_aug):
     logger.info(f'best threshold: {s_m}, validation_set Avg F1: {f1_m}')
     return s_m, f1_m
 
+def loadQuerys(dataset, root, train_n, val_n, test_n, train_path, test_path, val_path):
+    '''
+    加载数据的训练集、验证集和测试集
+    这里改的是输入的train_path等就是最终的path
+    :param dataset:
+    :param root:
+    :param train_n:
+    :param val_n:
+    :param test_n:
+    :param train_path:
+    :param test_path:
+    :param val_path:
+    :return:
+    '''
+    # path_train = os.path.join(root,dataset,f'{dataset}_{train_path}_{train_n}.txt')
+    if not os.path.isfile(train_path):
+        raise Exception("No such file: %s" % train_path)
+    print(f'训练记录经wei:{train_path}')
+    train_lists = []
+    for line in open(train_path, encoding='utf-8'):
+        q, pos, comm = line.split(",")
+        q = int(q)
+        pos = pos.split(" ")
+        pos_ = [int(x) for x in pos if int(x)!=q]
+        comm = comm.split(" ")
+        comm_ = [int(x) for x in comm]
+        if len(train_lists)>=train_n:
+            break
+        train_lists.append((q, pos_, comm_))
+
+    # path_test = os.path.join(root,dataset,f'{dataset}_{test_path}_{test_n}.txt')
+    if not os.path.isfile(test_path):
+        raise Exception("No such file: %s" % test_path)
+    test_lists = []
+    for line in open(test_path, encoding='utf-8'):
+        q, comm = line.split(",")
+        q = int(q)
+        comm = comm.split(" ")
+        comm_ = [int(x) for x in comm]
+        if len(test_lists)>=test_n:
+            break
+        test_lists.append((q, comm_))
+    # path_val = os.path.join(root,dataset,f'{dataset}_{val_path}_{val_n}.txt')
+    if not os.path.isfile(val_path):
+        raise Exception("No such file: %s" % val_path)
+    val_lists = []
+    for line in open(val_path, encoding='utf-8'):
+        q, comm = line.split(",")
+        q = int(q)
+        comm = comm.split(" ")
+        comm_ = [int(x) for x in comm]
+        if len(val_lists)>=val_n:
+            break
+        val_lists.append((q, comm_))
+
+    return train_lists, val_lists, test_lists
+
+def read_queries_from_file(file_path):
+    """
+    从文件中读取查询任务。和query_utils一样的
+    :param file_path: 包含查询任务的文件路径。
+    :return: 查询任务的列表，每个任务是 (q, pos, comm)，其中 pos 和 comm 是整数列表。
+    """
+    queries = []
+    with open(file_path, 'r') as f:
+        for line in f:
+            parts = line.strip().split(',')
+            if len(parts) == 3:
+                q = int(parts[0])
+                pos = list(map(int, parts[1].split()))
+                comm = list(map(int, parts[2].split()))
+                queries.append((q, pos, comm))
+            elif len(parts) == 2:  # 适用于测试集，可能只有 q 和 comm
+                q = int(parts[0])
+                comm = list(map(int, parts[1].split()))
+                queries.append((q, [], comm))  # 空 pos 列表
+    return queries
+
+def write_queries_to_file(queries, file_path):
+    """
+    和query_utils一样的
+    将生成好的查询任务写入文件。根据文件路径区分，测试集和验证集只写入 q 和 comm。
+    :param queries: 包含查询任务的列表，每个任务是 (q, pos, comm)。
+    :param file_path: 要写入的文件路径。
+    """
+    with open(file_path, 'w') as f:
+        if 'train' in file_path or 'queries' in file_path:
+            for q, pos, comm in queries:
+                q_str = str(q)
+                pos_str = ' '.join(map(str, pos))
+                comm_str = ' '.join(map(str, comm))
+                f.write(f"{q_str},{pos_str},{comm_str}\n")
+        else: #验证集和测试集，只存储q和comm
+            for q, _, comm in queries:
+                q_str = str(q)
+                comm_str = ' '.join(map(str, comm))
+                f.write(f"{q_str},{comm_str}\n")
 def validation_pre(val,nodes_feats, model, edge_index, edge_index_aug):
     '''
     改为选择precision最优的结果
@@ -112,6 +208,11 @@ def validation_pre(val,nodes_feats, model, edge_index, edge_index_aug):
     return s_m, pre_m
 
 def load_citations(args):
+    '''
+    修改了加载查询的部分，
+    :param args:
+    :return:
+    '''
     '''********************1. 加载图数据******************************'''
     graphx,n_nodes = load_graph(args.root,args.dataset,args.attack,args.ptb_rate)
 
@@ -150,8 +251,29 @@ def load_citations(args):
     else:
         dataset = args.dataset
     logger.info('正在加载训练数据')
+    queries = read_queries_from_file(f'{args.root}/{args.dataset}/{args.dataset}_all_queries.txt')  # 读取查询任务
+    split_ratios = (args.train_size, args.val_size, args.test_size)
+    train_size, val_size, test_size = split_ratios
+    assert sum(split_ratios) == len(queries), "Sum of split ratios must equal the total number of queries"
+    # 划分任务
+    train_queries = queries[:train_size]
+    validation_queries = queries[train_size:train_size + val_size]
+    test_queries = queries[train_size + val_size:train_size + val_size + test_size]
+    #定义路径,把比例都加上就不会重复了
+    dataset_root = os.path.join(args.root, args.dataset)
+    train_path = os.path.join(dataset_root, f'size/{args.dataset}_{args.attack}_{args.ptb_rate}_{args.pos_size}_pos_train_{split_ratios[0]}_{split_ratios[1]}_{split_ratios[2]}.txt')
+    val_path = os.path.join(dataset_root, f'size/{args.dataset}_{args.attack}_{args.ptb_rate}_{args.pos_size}_val_{split_ratios[0]}_{split_ratios[1]}_{split_ratios[2]}.txt')
+    test_path = os.path.join(dataset_root, f'size/{args.dataset}_{args.attack}_{args.ptb_rate}_{args.pos_size}_test_{split_ratios[0]}_{split_ratios[1]}_{split_ratios[2]}.txt')
+
+    # 写入训练集文件
+    write_queries_to_file(train_queries, train_path)
+    # 写入验证集文件
+    write_queries_to_file(validation_queries, val_path)
+    # 写入测试集文件
+    write_queries_to_file(test_queries, test_path)
+
     train, val, test = loadQuerys(dataset, args.root, args.train_size, args.val_size, args.test_size,
-                                  args.train_path, args.test_path, args.val_path)
+                                  train_path, val_path, test_path)
     logger.info('加载训练数据完成')
     '3.*************加载特征数据************'
     logger.info('正在加载特征数据')
@@ -315,7 +437,7 @@ def Community_Search(args,logger):
     logger.info(f'===best Pre at epoch {val_bst_pre_ep}, Best Precision:{val_bst_pre} ===,Best epoch time:{val_bst_pre_time}')
     logger.info(f'trainning time = {training_time},validate time ={val_epochs_time}')
 
-    bst_model_path = get_model_path('./results/coclep/res_model/',args)
+    bst_model_path = get_model_path('./results/coclep/res_model/size/',args)
     torch.save(val_bst_f1_model, f'{bst_model_path}_f1.pkl')  # 存储最优的模型
     torch.save(val_bst_pre_model,f'{bst_model_path}_pre.pkl') #存储最优pre的模型
 
@@ -399,7 +521,10 @@ def Community_Search(args,logger):
     logger.info(f'Test_set Avg NMI = {nmi_score}, ARI = {ari_score}, JAC = {jac_score}')
 
     # 存储测试结果
-    output = get_res_path('./results/coclep/', args)
+    # output = get_res_path('./results/coclep/', args)
+    output = get_Size_res_path('./results/coclep/', args)
+    os.makedirs(os.path.dirname(output), exist_ok=True)
+
     with open(output, 'a+',encoding='utf-8') as fh:
         current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         # f"best_comm_threshold: {s_}, best_validation_Avg_F1: {f1_}\n"
@@ -465,7 +590,7 @@ def Val_Community_Search(args,logger):
 
     logger.info(f'#################### Starting evaluation######################')
     #加载模型参数
-    bst_model_path = get_model_path('./results/coclep/res_model/',args)
+    bst_model_path = get_model_path('./results/coclep/res_model/size/',args)
     #目前是加载具有最优pre的模型
     if args.val_type == 'pre':
         embLearner.load_state_dict(torch.load(f'{bst_model_path}_pre.pkl'))  # 加载模型
@@ -544,7 +669,9 @@ def Val_Community_Search(args,logger):
     logger.info(f'Test_set Avg NMI = {nmi_score}, ARI = {ari_score}, JAC = {jac_score}')
 
     # 存储测试结果
-    output = get_res_path('./results/coclep/', args)
+    output = get_Size_res_path('./results/coclep/', args)
+    os.makedirs(os.path.dirname(output), exist_ok=True)
+
     with open(output, 'a+',encoding='utf-8') as fh:
         current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         # f"best_comm_threshold: {s_}, best_validation_Avg_F1: {f1_}\n"
@@ -586,6 +713,7 @@ if __name__ == '__main__':
 
     # 数据集选项
     parser.add_argument('--dataset', type=str, default='citeseer')
+    parser.add_argument('--pos_size', type=int, default=3) #每个训练查询顶点给出的标签数
     # 训练集、验证集、测试集大小，以及相应的文件路径，节点特征存储路径
     parser.add_argument('--train_size', type=int, default=300)
     parser.add_argument('--val_size', type=int, default=100)
@@ -702,7 +830,11 @@ if __name__ == '__main__':
     single_query_time = test_running_time_A/float(args.test_size)  #除以测试集大小得到测试时间
     # 将得到的结果进行存储，此时存储的是多次的average的各个指标。
     # 存储测试结果
-    output = get_res_path('./results/coclep/', args)
+    # output = get_res_path('./results/coclep/', args)
+
+    output = get_Size_res_path('./results/coclep/', args)
+    os.makedirs(os.path.dirname(output), exist_ok=True)
+
     with open(output, 'a+',encoding='utf-8') as fh:  # 记录的是 count 次的各个平均结果
         current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         line = (

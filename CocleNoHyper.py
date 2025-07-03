@@ -19,17 +19,15 @@ from models.EmbLearnerWithWeights import EmbLearnerwithWeights
 from models.EmbLearnerWithoutHyper import EmbLearnerWithoutHyper
 from utils.load_utils import load_data, hypergraph_construction, loadQuerys, load_graph
 from utils.log_utils import get_logger, get_log_path
-from utils.cocle_val_utils import f1_score_, NMI_score, ARI_score, JAC_score, get_res_path, get_model_path, cal_pre, \
-    get_comm_path
+from utils.cocle_val_utils import f1_score_, NMI_score, ARI_score, JAC_score, get_res_path, get_model_path, cal_pre
 import copy
 '''
-使用引文网络相关的数据集
-这个是coclep源码
+是cocle的源码去掉hypergraph部分
 '''
-def validation(val,nodes_feats, model, edge_index, edge_index_aug):
+def validation(val,nodes_feats, model, edge_index):
     scorelists = []
     for q, comm in val:
-        h = model((q, None, edge_index, edge_index_aug, nodes_feats))
+        h = model((q, None, edge_index, nodes_feats))
         # 计算余弦相似度
         sim=F.cosine_similarity(h[q].unsqueeze(0),h,dim=1) #(115,)
         #使用 torch.sigmoid 将相似度值转换为概率，然后使用 squeeze(0) 移除多余的维度，
@@ -64,7 +62,7 @@ def validation(val,nodes_feats, model, edge_index, edge_index_aug):
     logger.info(f'best threshold: {s_m}, validation_set Avg F1: {f1_m}')
     return s_m, f1_m
 
-def validation_pre(val,nodes_feats, model, edge_index, edge_index_aug):
+def validation_pre(val,nodes_feats, model, edge_index):
     '''
     改为选择precision最优的结果
     :param val:
@@ -76,7 +74,7 @@ def validation_pre(val,nodes_feats, model, edge_index, edge_index_aug):
     '''
     scorelists = []
     for q, comm in val:
-        h = model((q, None, edge_index, edge_index_aug, nodes_feats))
+        h = model((q, None, edge_index, nodes_feats))
         # 计算余弦相似度
         sim = F.cosine_similarity(h[q].unsqueeze(0), h, dim=1)  # (115,)
         # 使用 torch.sigmoid 将相似度值转换为概率，然后使用 squeeze(0) 移除多余的维度，
@@ -114,20 +112,6 @@ def validation_pre(val,nodes_feats, model, edge_index, edge_index_aug):
 def load_citations(args):
     '''********************1. 加载图数据******************************'''
     graphx,n_nodes = load_graph(args.root,args.dataset,args.attack,args.ptb_rate)
-
-    # calAA_start = datetime.datetime.now()
-    # # 计算aa指标
-    # aa_indices = nx.adamic_adar_index(graphx)
-    # # 初始化 Adamic-Adar 矩阵
-    # aa_matrix = np.zeros((n_nodes, n_nodes))
-    # # 计算 Adamic-Adar 指数
-    # for u, v, p in aa_indices:
-    #     aa_matrix[u, v] = p
-    #     aa_matrix[v, u] = p  # 因为是无向图，所以也需要填充对称位置
-    # # 转换为张量
-    # aa_tensor = torch.tensor(aa_matrix, dtype=torch.float32)
-    # logger.info(f'calAA_time = {datetime.datetime.now() - calAA_start}')
-
     src = []
     dst = []
     for id1, id2 in graphx.edges:
@@ -139,11 +123,11 @@ def load_citations(args):
     num_nodes = graphx.number_of_nodes()
     adj_matrix = csr_matrix(([1] * len(src), (src, dst)), shape=(num_nodes, num_nodes))
     # 构建超图
-    calhyper_start = datetime.datetime.now()
+    # calhyper_start = datetime.datetime.now()
     edge_index = torch.tensor([src, dst])
-    edge_index_aug, egde_attr = hypergraph_construction(edge_index, n_nodes, k=args.k)  # 构建超图
+    # edge_index_aug, egde_attr = hypergraph_construction(edge_index, n_nodes, k=args.k)  # 构建超图
     edge_index = add_remaining_self_loops(edge_index, num_nodes=n_nodes)[0]
-    logger.info(f'Cal Hyper_time = {datetime.datetime.now() - calhyper_start}')
+    # logger.info(f'Cal Hyper_time = {datetime.datetime.now() - calhyper_start}')
     '''2:************************加载训练数据**************************'''
     if args.dataset.startswith('stb_'):
         dataset = args.dataset[4:]
@@ -155,12 +139,12 @@ def load_citations(args):
     logger.info('加载训练数据完成')
     '3.*************加载特征数据************'
     logger.info('正在加载特征数据')
-    if args.dataset in ['cora','pubmed','citeseer']:
+    if args.dataset in ['cora','citeseer_stb','pubmed','citeseer']:
         nodes_feats = citation_feature_reader(args.root, dataset)  # numpy.ndaaray:(2708,1433)
         nodes_feats = torch.from_numpy(nodes_feats)  # 转换成tensor
         node_in_dim = nodes_feats.shape[1]
         print(f'{args.dataset}的feats dtype: {nodes_feats.dtype}')
-    elif args.dataset in ['cora_stb','cora_gsr','citeseer_stb','citeseer_gsr']:
+    elif args.dataset in ['cora_stb','cora_gsr']:
         nodes_feats = citation_feature_reader(args.root, dataset[:-4])  # numpy.ndaaray:(2708,1433)
         nodes_feats = torch.from_numpy(nodes_feats)  # 转换成tensor
         node_in_dim = nodes_feats.shape[1]
@@ -178,7 +162,7 @@ def load_citations(args):
             print(f'{args.dataset}的节点特征shape:', nodes_feats.shape)
             nodes_feats = torch.from_numpy(nodes_feats)  # 转换成tensor
             node_in_dim = nodes_feats.shape[1]
-    elif args.dataset in ['fb107','wfb107']:  # 不加入中心节点
+    elif args.dataset.startswith(('fb', 'wfb', 'fa')):  # 不加入中心节点
         feats_array = np.loadtxt(f'{args.root}/{args.dataset}/{args.dataset}.feat', delimiter=' ', dtype=np.float32)
         print(type(feats_array))
         # nodes_feats = fnormalize(feats_array)  # 将特征进行归一化
@@ -188,34 +172,10 @@ def load_citations(args):
         feats_array = np.loadtxt(f'{args.root}/{args.dataset}/{args.dataset}.feat', dtype=float, delimiter=' ')
         nodes_feats = torch.tensor(feats_array, dtype=torch.float32)
         node_in_dim = nodes_feats.shape[1]
-    elif args.dataset in ['football']:
-        path_feat = args.root + args.dataset + '/' + args.feats_path
-        if not os.path.isfile(path_feat):
-            raise Exception("No such file: %s" % path_feat)
-        feats_node = {}
-        count = 1
-        for line in open(path_feat, encoding='utf-8'):
-            if count == 1:
-                node_n_, node_in_dim = line.split()
-                node_in_dim = int(node_in_dim)
-                count = count + 1
-            else:
-                emb = [float(x) for x in line.split()]
-                id = int(emb[0])
-                emb = emb[1:]
-                feats_node[id] = emb
-        nodes_feats = []
-
-        for i in range(0, n_nodes):
-            if i not in feats_node:
-                nodes_feats.append([0.0] * node_in_dim)
-            else:
-                nodes_feats.append(feats_node[i])
-        nodes_feats = torch.tensor(nodes_feats)
     else:
         print('加载节点特征失败，数据集不匹配')
     print('加载节点特征完成完成')
-    return nodes_feats, train, val, test, node_in_dim, n_nodes, edge_index, edge_index_aug, adj_matrix  #, aa_tensor
+    return nodes_feats, train, val, test, node_in_dim, n_nodes, edge_index, adj_matrix  #, aa_tensor
 
 
 
@@ -226,18 +186,18 @@ def Community_Search(args,logger):
     logger.info(f'device: {device}')
 
     #加载数据并移动到device
-    # nodes_feats, train, val, test, node_in_dim, n_nodes, edge_index, edge_index_aug, adj_matrix, aa_th = load_citations(args)
-    nodes_feats, train, val, test, node_in_dim, n_nodes, edge_index, edge_index_aug, adj_matrix = load_citations(args)
+    # nodes_feats, train, val, test, node_in_dim, n_nodes, edge_index, adj_matrix, aa_th = load_citations(args)
+    nodes_feats, train, val, test, node_in_dim, n_nodes, edge_index, adj_matrix = load_citations(args)
     logger.info(f'load_time = {datetime.datetime.now() - preprocess_start}, train len = {len(train)}')
     nodes_feats = nodes_feats.to(device)
     edge_index = edge_index.to(device)
-    edge_index_aug = edge_index_aug.to(device)
+    # edge_index_aug = edge_index_aug.to(device)
 
     #创建节点嵌入学习模型
     if args.method == 'EmbLearner':
         embLearner = EmbLearner(node_in_dim, args.hidden_dim, args.num_layers, args.drop_out, args.tau, device,args.alpha, args.lam, args.k)  # COCLEP中的模型
 
-    elif args.method == '':
+    elif args.method == 'NoHy':
         embLearner = EmbLearnerWithoutHyper(node_in_dim, args.hidden_dim, args.num_layers, args.drop_out, args.tau,device, args.alpha, args.lam, args.k)  # 去掉COCLEP中的超图视图，但得到的结果很差
 
     elif args.method == 'COCLE':  #这个是初始最默认的算法
@@ -280,7 +240,7 @@ def Community_Search(args,logger):
                 i = i + 1
                 continue
             # 前馈
-            loss,h = embLearner((q, pos, edge_index, edge_index_aug, nodes_feats))
+            loss,h = embLearner((q, pos, edge_index, nodes_feats))
             loss_b = loss_b + loss.item()  # 累积批次中的损失
             loss.backward()
             if (i + 1) % args.batch_size == 0:
@@ -293,8 +253,8 @@ def Community_Search(args,logger):
         embLearner.eval()
         with torch.no_grad():
             val_start = datetime.datetime.now()
-            s_,f1_ = validation(val,nodes_feats,embLearner,edge_index, edge_index_aug)
-            sp_,pre_ = validation_pre(val,nodes_feats,embLearner,edge_index, edge_index_aug)
+            s_,f1_ = validation(val,nodes_feats,embLearner,edge_index)
+            sp_,pre_ = validation_pre(val,nodes_feats,embLearner,edge_index)
             val_time = (datetime.datetime.now() - val_start).seconds  #这两个验证的时间
             val_epochs_time= val_epochs_time+val_time
         if f1_ > val_best_f1:
@@ -342,49 +302,47 @@ def Community_Search(args,logger):
     with torch.no_grad():
         #使用验证集数据找打最佳阈值s_
         if args.val_type == 'f1':
-            s_, f1_ = validation(val, nodes_feats, embLearner, edge_index, edge_index_aug)
+            s_, f1_ = validation(val, nodes_feats, embLearner, edge_index)
             logger.info(f'evaluation time = {datetime.datetime.now() - eval_start}, best s_={s_}, best val f1_={f1_}')
         elif args.val_type == 'pre':
-            s_, pre_ = validation_pre(val, nodes_feats, embLearner, edge_index, edge_index_aug)
+            s_, pre_ = validation_pre(val, nodes_feats, embLearner, edge_index)
             logger.info(f'evaluation time = {datetime.datetime.now() - eval_start}, best s_={s_}, best val pre_={pre_}')
         val_running_time = (datetime.datetime.now() - eval_start).seconds  # 结束了测试运行的时间
         #开始测试
         logger.info(f'#################### starting test  ####################')
         test_start = datetime.datetime.now()
-        # 将找到的社区结果存入文件
-        comm_path = get_comm_path('./results/coclep/', args)
-        logger.info(f'找到的社区将被存入{comm_path}')
-        with open(comm_path, 'a', encoding='utf-8') as f:
-            for q, comm in test:
-                h = embLearner((q, None, edge_index, edge_index_aug, nodes_feats))
-                count = count + 1
-                sim = F.cosine_similarity(h[q].unsqueeze(0), h, dim=1)
-                simlists = torch.sigmoid(sim.squeeze(0)).to(torch.device('cpu')).numpy().tolist()
+        for q,comm in test:
+            h = embLearner((q, None, edge_index, nodes_feats))
+            count = count + 1
+            sim = F.cosine_similarity(h[q].unsqueeze(0), h, dim=1)
+            simlists = torch.sigmoid(sim.squeeze(0)).to(torch.device('cpu')).numpy().tolist()
 
-                comm_find = []
-                for i, score in enumerate(simlists):
-                    if score >= s_ and i not in comm_find:  # 此时的阈值已经是前面找到的最优的阈值了
-                        comm_find.append(i)
+            comm_find = []
+            for i, score in enumerate(simlists):
+                if score >= s_ and i not in comm_find:  # 此时的阈值已经是前面找到的最优的阈值了
+                    comm_find.append(i)
 
-                comm_find = set(comm_find)
-                comm_find = list(comm_find)
-                #将找到的社区存入文件。
-                line = str(q) + "," + " ".join(str(u) for u in comm_find)
-                f.write(line + "\n")
-                comm = set(comm)
-                comm = list(comm)
-                f1, pre, rec = f1_score_(comm_find, comm)
-                F1 = F1 + f1  # 累加每个样本的F1,pre和rec
-                Pre = Pre + pre
-                Rec = Rec + rec
-                nmi = NMI_score(comm_find, comm, n_nodes)  # 计算当前样本的NMI
-                nmi_score = nmi_score + nmi  # 将当前样本的NMI累加
+            comm_find = set(comm_find)
+            comm_find = list(comm_find)
+            comm = set(comm)
+            comm = list(comm)
+            f1, pre, rec = f1_score_(comm_find, comm)
+            F1 = F1 + f1  # 累加每个样本的F1,pre和rec
+            Pre = Pre + pre
+            Rec = Rec + rec
+            # print(f'--{count}--')
+            # print(f"第{count}个样本Res：q = {q},f1 = {f1}, pre = {pre}, rec = {rec}")
+            # print(f"到{count}个样本时的Avg Res：F1 ={F1 / count}, Pre = {Pre / count}, Rec = {Rec / count}")
 
-                ari = ARI_score(comm_find, comm, n_nodes)  # 计算当前样本的ARI
-                ari_score = ari_score + ari  # 将当前样本的ARI累加
+            nmi = NMI_score(comm_find, comm, n_nodes)  # 计算当前样本的NMI
+            nmi_score = nmi_score + nmi  # 将当前样本的NMI累加
 
-                jac = JAC_score(comm_find, comm, n_nodes)  # 计算当前样本的JAC
-                jac_score = jac_score + jac  # 将当前样本的JAC累加
+            ari = ARI_score(comm_find, comm, n_nodes)  # 计算当前样本的ARI
+            ari_score = ari_score + ari  # 将当前样本的ARI累加
+
+            jac = JAC_score(comm_find, comm, n_nodes)  # 计算当前样本的JAC
+            jac_score = jac_score + jac  # 将当前样本的JAC累加
+
     # 结束了测试阶段，计算测试集上的平均F1,Pre和Rec并打印
     test_running_time = (datetime.datetime.now() - test_start).seconds  # 结束了测试运行的时间
 
@@ -427,149 +385,6 @@ def Community_Search(args,logger):
         fh.close()
     return F1, Pre, Rec, nmi_score, ari_score, jac_score, pre_process_time, training_time,val_time, test_running_time
 
-
-'''用这个做验证'''
-def Val_Community_Search(args,logger):
-
-    preprocess_start = datetime.datetime.now()
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    logger.info(f'device: {device}')
-
-    #加载数据并移动到device
-    nodes_feats, train, val, test, node_in_dim, n_nodes, edge_index, edge_index_aug, adj_matrix = load_citations(args)
-    logger.info(f'load_time = {datetime.datetime.now() - preprocess_start}, train len = {len(train)}')
-    nodes_feats = nodes_feats.to(device)
-    edge_index = edge_index.to(device)
-    edge_index_aug = edge_index_aug.to(device)
-
-    #创建节点嵌入学习模型
-    if args.method == 'EmbLearner':
-        embLearner = EmbLearner(node_in_dim, args.hidden_dim, args.num_layers, args.drop_out, args.tau, device,args.alpha, args.lam, args.k)  # COCLEP中的模型
-
-    elif args.method == '':
-        embLearner = EmbLearnerWithoutHyper(node_in_dim, args.hidden_dim, args.num_layers, args.drop_out, args.tau,device, args.alpha, args.lam, args.k)  # 去掉COCLEP中的超图视图，但得到的结果很差
-
-    elif args.method == 'COCLE':  #这个是初始最默认的算法
-        embLearner = COCLE(node_in_dim, args.hidden_dim, args.num_layers, args.drop_out, args.tau, device, args.alpha, args.lam, args.k) #COCLEP中的模型，目前和EmbLearner是一样的
-
-    elif args.method == 'EmbLearnerwithWeights': #将这个作为我的
-        embLearner = EmbLearnerwithWeights(node_in_dim, args.hidden_dim,args.num_layers,args.drop_out,args.tau,device,args.alpha,args.lam,args.k) #传入edge_weight参数的模型
-    else:
-        raise ValueError(f'method {args.method} not supported')
-
-    logger.info(f'embLearner: {args.method}')
-
-    emb_optim = torch.optim.Adam(embLearner.parameters(), lr=args.lr,weight_decay=args.weight_decay)
-    embLearner.to(device)
-
-
-    logger.info(f'#################### Starting evaluation######################')
-    #加载模型参数
-    bst_model_path = get_model_path('./results/coclep/res_model/',args)
-    #目前是加载具有最优pre的模型
-    if args.val_type == 'pre':
-        embLearner.load_state_dict(torch.load(f'{bst_model_path}_pre.pkl'))  # 加载模型
-    else:
-        embLearner.load_state_dict(torch.load(f'{bst_model_path}_f1.pkl'))  # 加载模型
-    embLearner.eval()
-
-    F1 = 0.0
-    Pre = 0.0
-    Rec = 0.0
-
-    nmi_score = 0.0
-    ari_score = 0.0
-    jac_score = 0.0
-    count = 0.0
-
-    eval_start = datetime.datetime.now()
-
-    with torch.no_grad():
-        #使用验证集数据找打最佳阈值s_
-        if args.val_type == 'f1':
-            s_, f1_ = validation(val, nodes_feats, embLearner, edge_index, edge_index_aug)
-            logger.info(f'evaluation time = {datetime.datetime.now() - eval_start}, best s_={s_}, best val f1_={f1_}')
-        elif args.val_type == 'pre':
-            s_, pre_ = validation_pre(val, nodes_feats, embLearner, edge_index, edge_index_aug)
-            logger.info(f'evaluation time = {datetime.datetime.now() - eval_start}, best s_={s_}, best val pre_={pre_}')
-        val_running_time = (datetime.datetime.now() - eval_start).seconds  # 结束了测试运行的时间
-        #开始测试
-        logger.info(f'#################### starting test  ####################')
-        test_start = datetime.datetime.now()
-        # 将找到的社区结果存入文件
-        comm_path = get_comm_path('./results/coclep/', args)
-        logger.info(f'找到的社区将被存入{comm_path}')
-        with open(comm_path, 'a', encoding='utf-8') as f:
-            for q, comm in test:
-                h = embLearner((q, None, edge_index, edge_index_aug, nodes_feats))
-                count = count + 1
-                sim = F.cosine_similarity(h[q].unsqueeze(0), h, dim=1)
-                simlists = torch.sigmoid(sim.squeeze(0)).to(torch.device('cpu')).numpy().tolist()
-
-                comm_find = []
-                for i, score in enumerate(simlists):
-                    if score >= s_ and i not in comm_find:  # 此时的阈值已经是前面找到的最优的阈值了
-                        comm_find.append(i)
-
-                comm_find = set(comm_find)
-                comm_find = list(comm_find)
-                #将找到的社区存入文件。
-                line = str(q) + "," + " ".join(str(u) for u in comm_find)
-                f.write(line + "\n")
-                comm = set(comm)
-                comm = list(comm)
-                f1, pre, rec = f1_score_(comm_find, comm)
-                F1 = F1 + f1  # 累加每个样本的F1,pre和rec
-                Pre = Pre + pre
-                Rec = Rec + rec
-                nmi = NMI_score(comm_find, comm, n_nodes)  # 计算当前样本的NMI
-                nmi_score = nmi_score + nmi  # 将当前样本的NMI累加
-
-                ari = ARI_score(comm_find, comm, n_nodes)  # 计算当前样本的ARI
-                ari_score = ari_score + ari  # 将当前样本的ARI累加
-
-                jac = JAC_score(comm_find, comm, n_nodes)  # 计算当前样本的JAC
-                jac_score = jac_score + jac  # 将当前样本的JAC累加
-    # 结束了测试阶段，计算测试集上的平均F1,Pre和Rec并打印
-    test_running_time = (datetime.datetime.now() - test_start).seconds  # 结束了测试运行的时间
-
-    F1 = F1 / len((test))
-    Pre = Pre / len((test))
-    Rec = Rec / len((test))
-    nmi_score = nmi_score / len(test)
-    ari_score = ari_score / len(test)
-    jac_score = jac_score / len(test)
-    logger.info(f'Test time = {test_running_time}')
-    logger.info(f'Test_set Avg：F1 = {F1}, Pre = {Pre}, Rec = {Rec}, s = {s_}')
-    logger.info(f'Test_set Avg NMI = {nmi_score}, ARI = {ari_score}, JAC = {jac_score}')
-
-    # 存储测试结果
-    output = get_res_path('./results/coclep/', args)
-    with open(output, 'a+',encoding='utf-8') as fh:
-        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        # f"best_comm_threshold: {s_}, best_validation_Avg_F1: {f1_}\n"
-        #这里都是单次运行的时间
-        line = (
-            f"args: {args}\n"
-            f"val_type:{args.val_type}"
-            f"best_comm_threshold: {s_}\n"
-            f"pre_process_time: {pre_process_time}\n"
-            f"val_time:{val_running_time}"
-            f"test_running_time: {test_running_time}\n"
-            f"F1: {F1}\n"
-            f"Pre: {Pre}\n"
-            f"Rec: {Rec}\n"
-            f"nmi_score: {nmi_score}\n"
-            f"ari_score: {ari_score}\n"
-            f"jac_score: {jac_score}\n"
-            f"current_time: {current_time}\n"
-            "----------------------------------------\n"
-        )
-        fh.write(line)
-        fh.close()
-    return F1, Pre, Rec, nmi_score, ari_score, jac_score, pre_process_time,val_time, test_running_time
-
-
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -580,12 +395,12 @@ if __name__ == '__main__':
     # parser.add_argument("--log", action='store_true', help='run prepare_data or not')
     parser.add_argument("--log", type=bool,default=True, help='run prepare_data or not')
     # 训练完毕的模型的存储路径
-    parser.add_argument('--method',type=str,default='COCLE',choices=['EmbLearner','COCLE','EmbLearnerWithoutHyper','EmbLearnerwithWeights'])
+    parser.add_argument('--method',type=str,default='NoHy',choices=['EmbLearner','COCLE','NoHy','EmbLearnerwithWeights'])
     parser.add_argument('--model_path', type=str, default='CS')
     parser.add_argument('--m_model_path', type=str, default='META')
 
     # 数据集选项
-    parser.add_argument('--dataset', type=str, default='citeseer')
+    parser.add_argument('--dataset', type=str, default='photo')
     # 训练集、验证集、测试集大小，以及相应的文件路径，节点特征存储路径
     parser.add_argument('--train_size', type=int, default=300)
     parser.add_argument('--val_size', type=int, default=100)

@@ -165,7 +165,7 @@ class EmbLearnerWithoutHyper(nn.Module):
         '''
         #获取训练数据
         loss = None
-        q, pos, edge_index, edge_index_aug, feats = train
+        q, pos, edge_index, feats = train
         querys = torch.zeros(feats.shape[0], 1).to(self.device)
         querys[q] = 1.0  # 与特征维度相同的0张量，并将查询节点索引位置置为1
 
@@ -245,7 +245,7 @@ class EmbLearnerWithoutHyper(nn.Module):
         :return:
         '''
         #获取数据
-        q,pos,edge_index,edge_index_aug,feats =train
+        q,pos,edge_index,feats =train
         querys = torch.zeros(feats.shape[0], 1).to(self.device)
         querys[q] = 1.0
 

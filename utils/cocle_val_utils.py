@@ -125,6 +125,86 @@ def get_res_path(resroot,args):
     else:
         return f'{resroot}{args.dataset}/{args.dataset}_{args.method}_res.txt'
 
+def get_epoch_res_path(resroot,args):
+    '''
+    根据args创建需要的结果路径
+    :param args:
+    :return:
+    '''
+    if not os.path.exists(f'{resroot}{args.dataset}'):
+        os.makedirs(f'{resroot}{args.dataset}')
+    if args.attack == 'meta':
+        return f'{resroot}{args.dataset}/Epoch_{args.dataset}_{args.attack}_{args.ptb_rate}_{args.method}_res.txt'
+    # elif args.attack == 'random':
+    #     return f'{resroot}{args.dataset}/{args.dataset}_{args.attack}_{args.type}_{args.ptb_rate}_{args.method}_res.txt'
+    # elif args.attack =='add':
+    #     return f'{resroot}{args.dataset}_{args.aug}_{args.attack}_{args.noise_level}_{args.method}_res.txt'
+    elif args.attack in  ['del','gflipm','gdelm','add','random_remove','random_add','random_flip','gaddm','cdelm','cflipm','delm','flipm']:
+        return f'{resroot}{args.dataset}/Epoch_{args.dataset}_{args.attack}_{args.ptb_rate}_{args.method}_res.txt'
+    else:
+        return f'{resroot}{args.dataset}/Epoch_{args.dataset}_{args.method}_res.txt'
+
+def get_Size_res_path(resroot,args):
+    '''
+    根据args创建需要的结果路径
+    :param args:
+    :return:
+    '''
+    if args.val_size ==100:
+        if not os.path.exists(f'{resroot}{args.dataset}'):
+            os.makedirs(f'{resroot}{args.dataset}')
+        if args.attack == 'meta':
+            return f'{resroot}{args.dataset}/Size_{args.dataset}_{args.attack}_{args.ptb_rate}_{args.method}_res.txt'
+        # elif args.attack == 'random':
+        #     return f'{resroot}{args.dataset}/{args.dataset}_{args.attack}_{args.type}_{args.ptb_rate}_{args.method}_res.txt'
+        # elif args.attack =='add':
+        #     return f'{resroot}{args.dataset}_{args.aug}_{args.attack}_{args.noise_level}_{args.method}_res.txt'
+        elif args.attack in ['del', 'gflipm', 'gdelm', 'add', 'random_remove', 'random_add', 'random_flip', 'gaddm',
+                             'cdelm', 'cflipm', 'delm', 'flipm']:
+            return f'{resroot}{args.dataset}/Size_{args.dataset}_{args.attack}_{args.ptb_rate}_{args.method}_res.txt'
+        else:
+            return f'{resroot}{args.dataset}/Size_{args.dataset}_{args.method}_res.txt'
+    else:
+        if not os.path.exists(f'{resroot}{args.dataset}'):
+            os.makedirs(f'{resroot}{args.dataset}')
+        if args.attack == 'meta':
+            return f'{resroot}{args.dataset}/ValSize_{args.dataset}_{args.attack}_{args.ptb_rate}_{args.method}_res.txt'
+        elif args.attack in ['del', 'gflipm', 'gdelm', 'add', 'random_remove', 'random_add', 'random_flip', 'gaddm',
+                             'cdelm', 'cflipm', 'delm', 'flipm']:
+            return f'{resroot}{args.dataset}/ValSize_{args.dataset}_{args.attack}_{args.ptb_rate}_{args.method}_res.txt'
+        else:
+            return f'{resroot}{args.dataset}/ValSize_{args.dataset}_{args.method}_res.txt'
+
+
+def get_comm_path(resroot,args):
+    '''
+    根据args创建需要的结果路径
+    :param args:
+    :return:
+    '''
+    if args.dataset =='cora': #cora被用来做敏感性分析
+        if args.lam ==0.001 and args.alpha ==0.001:
+            newroot = './Case/coclep/comm'
+        else:
+            newroot =f'{resroot}comm'
+    elif args.dataset in ['fb107','wfb107','facebook']: #fb被用来做敏感性分析
+        if args.lam == 0.2 and args.alpha == 0.2:
+            newroot = './Case/coclep/comm'
+        else:
+            newroot = f'{resroot}comm'
+    elif args.dataset in ['cora_gsr','cora_stb','citeseer_gsr','citeseer_stb','fb107_gsr','fb107_stb','facebook_gsr','facebook_stb','cocs_gsr','cocs_stb','photo_gsr','photo_stb','dblp_gsr','dblp_stb']:
+        newroot = './Case/coclep/comm'  #因为这个图清理的方法我是不会用来进行敏感性分析的，一定是好的超参数
+    else:
+        newroot = './Case/coclep/comm'
+
+    if not os.path.exists(newroot):
+        os.makedirs(newroot)  #results/coclep/cora/
+
+    if args.attack =='none':
+        return f'{newroot}/{args.dataset}_{args.method}_res.txt'
+    else: #没有攻击
+        return f'{newroot}/{args.dataset}_{args.attack}_{args.ptb_rate}_{args.method}_res.txt'
+
 def get_model_path(model_dir,args):
     '''
     返回存储最佳模型的路径

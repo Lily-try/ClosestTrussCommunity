@@ -47,6 +47,7 @@ class LocalCommunity(object):
     def my_evaluate_community(self,cnodes,top_index,seed_comm, name,using_time):
         '''
             评估搜索到的社区的质量
+            :cnodes
             :param top_index   预测为正的索引
             :param seed_comm 当前样本的实际社区
             :param name: 当前使用的方法
@@ -92,7 +93,7 @@ class LocalCommunity(object):
             self.upgraph.methods[name] =[self.upgraph.methods[name][i]+results[i] for i in range(len(results))]
             self.upgraph.time_map[name] += using_time
             self.upgraph.cntmap[name]+=1
-        # print(name + " Precision={:.4f}  Precision without posnode={:.4f} using {:.4f}s".format(results[0],results[1],using_time))
+
         return f1,pre,rec,using_time,results[0]
 
 

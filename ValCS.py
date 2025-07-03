@@ -4,10 +4,13 @@ import datetime
 import os
 
 import networkx as nx
+import pandas as pd
 import scipy.sparse as sp
 import numpy as np
 import torch
 import torch.nn.functional as F
+from matplotlib import pyplot as plt
+from scipy.stats import ttest_ind, ttest_rel
 from torch_geometric.utils import add_remaining_self_loops
 
 from scipy.sparse import csr_matrix
@@ -21,6 +24,12 @@ from utils.load_utils import load_data, hypergraph_construction, loadQuerys, loa
 from utils.log_utils import get_logger, get_log_path
 from utils.cocle_val_utils import f1_score_, NMI_score, ARI_score, JAC_score, get_res_path, get_model_path, cal_pre, \
     get_comm_path
+
+import torch, random, itertools, numpy as np
+from collections import defaultdict
+from scipy.stats import ttest_ind
+import matplotlib.pyplot as plt
+plt.switch_backend("Agg")
 import copy
 '''
 使用引文网络相关的数据集
@@ -217,217 +226,6 @@ def load_citations(args):
     print('加载节点特征完成完成')
     return nodes_feats, train, val, test, node_in_dim, n_nodes, edge_index, edge_index_aug, adj_matrix  #, aa_tensor
 
-
-
-def Community_Search(args,logger):
-
-    preprocess_start = datetime.datetime.now()
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    logger.info(f'device: {device}')
-
-    #加载数据并移动到device
-    # nodes_feats, train, val, test, node_in_dim, n_nodes, edge_index, edge_index_aug, adj_matrix, aa_th = load_citations(args)
-    nodes_feats, train, val, test, node_in_dim, n_nodes, edge_index, edge_index_aug, adj_matrix = load_citations(args)
-    logger.info(f'load_time = {datetime.datetime.now() - preprocess_start}, train len = {len(train)}')
-    nodes_feats = nodes_feats.to(device)
-    edge_index = edge_index.to(device)
-    edge_index_aug = edge_index_aug.to(device)
-
-    #创建节点嵌入学习模型
-    if args.method == 'EmbLearner':
-        embLearner = EmbLearner(node_in_dim, args.hidden_dim, args.num_layers, args.drop_out, args.tau, device,args.alpha, args.lam, args.k)  # COCLEP中的模型
-
-    elif args.method == '':
-        embLearner = EmbLearnerWithoutHyper(node_in_dim, args.hidden_dim, args.num_layers, args.drop_out, args.tau,device, args.alpha, args.lam, args.k)  # 去掉COCLEP中的超图视图，但得到的结果很差
-
-    elif args.method == 'COCLE':  #这个是初始最默认的算法
-        embLearner = COCLE(node_in_dim, args.hidden_dim, args.num_layers, args.drop_out, args.tau, device, args.alpha, args.lam, args.k) #COCLEP中的模型，目前和EmbLearner是一样的
-
-    elif args.method == 'EmbLearnerwithWeights': #将这个作为我的
-        embLearner = EmbLearnerwithWeights(node_in_dim, args.hidden_dim,args.num_layers,args.drop_out,args.tau,device,args.alpha,args.lam,args.k) #传入edge_weight参数的模型
-    else:
-        raise ValueError(f'method {args.method} not supported')
-
-    logger.info(f'embLearner: {args.method}')
-
-    emb_optim = torch.optim.Adam(embLearner.parameters(), lr=args.lr,weight_decay=args.weight_decay)
-    embLearner.to(device)
-    #1.预处理时间
-    pre_process_time = (datetime.datetime.now() - preprocess_start).seconds
-    logger.info('start trainning')
-    val_best_f1 = 0.  # 记录最优的结果
-    val_bst_pre = 0.
-    val_bst_f1_ep = 0  # 记录取得最优结果的epoch
-    val_bst_pre_ep = 0  # 记录取得最优结果的epoch
-    val_bst_f1_model = copy.deepcopy(embLearner.state_dict())  # 存储最优的模型
-    val_bst_pre_model = copy.deepcopy(embLearner.state_dict())  # 存储最优的模型
-    val_epochs_time=0.0 #记录整个epoch下的时间
-    #需要一个时间记录运行到最优的epoch后花费的时间
-    #模型训练阶段
-    # logger.info(torch.cuda.memory_summary(device=None, abbreviated=True))
-    # torch.cuda.empty_cache()
-    # torch.cuda.ipc_collect()
-    # logger.info(torch.cuda.memory_summary(device=None, abbreviated=True))
-
-    train_start = datetime.datetime.now()  # 记录模型训练的开始时间
-    for epoch in range(args.epoch_n):
-        embLearner.train()
-        start = datetime.datetime.now()
-        loss_b = 0.0
-        i = 0
-        for q, pos, comm in train:
-            if len(pos) == 0:
-                i = i + 1
-                continue
-            # 前馈
-            loss,h = embLearner((q, pos, edge_index, edge_index_aug, nodes_feats))
-            loss_b = loss_b + loss.item()  # 累积批次中的损失
-            loss.backward()
-            if (i + 1) % args.batch_size == 0:
-                emb_optim.step()
-                emb_optim.zero_grad()
-            i = i + 1
-        epoch_time = (datetime.datetime.now() - start).seconds  # 运行每个epoch的时间
-        logger.info(f'epoch_loss = {loss_b}, epoch = {epoch}, epoch_time = {epoch_time}')
-        # 每轮训练完成后，记录验证集上的准确度，选择最优的结果
-        embLearner.eval()
-        with torch.no_grad():
-            val_start = datetime.datetime.now()
-            s_,f1_ = validation(val,nodes_feats,embLearner,edge_index, edge_index_aug)
-            sp_,pre_ = validation_pre(val,nodes_feats,embLearner,edge_index, edge_index_aug)
-            val_time = (datetime.datetime.now() - val_start).seconds  #这两个验证的时间
-            val_epochs_time= val_epochs_time+val_time
-        if f1_ > val_best_f1:
-            val_best_f1 = f1_
-            val_bst_f1_ep = epoch
-            val_bst_f1_model = copy.deepcopy(embLearner.state_dict())  # 拷贝的是最佳的权重
-            # logger.info(f"Type of val_best_model: {type(val_bst_f1_model)}")
-            val_bst_f1_time=(datetime.datetime.now() - train_start).seconds -val_epochs_time #当前这个epoch的时间减去训练后的时间,将验证的时间减去？？
-        if pre_ > val_bst_pre:
-            val_bst_pre = pre_
-            val_bst_pre_ep = epoch
-            val_bst_pre_model = copy.deepcopy(embLearner.state_dict())  # 拷贝的是最佳的权重
-            # logger.info(f"Type of val_best_pre_model: {type(val_bst_pre_model)}")
-            val_bst_pre_time=(datetime.datetime.now() - train_start).seconds -val_epochs_time #当前这个epoch的时间减去训练后的时间,将验证的时间减去？？
-    #2.整个100个的训练时间
-    training_time = (datetime.datetime.now() - train_start).seconds-val_epochs_time #将验证的时间减去
-    logger.info(f'===best F1 at epoch {val_bst_f1_ep}, Best F1:{val_best_f1} ===,Best epoch time:{val_bst_f1_time}')
-    logger.info(f'===best Pre at epoch {val_bst_pre_ep}, Best Precision:{val_bst_pre} ===,Best epoch time:{val_bst_pre_time}')
-    logger.info(f'trainning time = {training_time},validate time ={val_epochs_time}')
-
-    bst_model_path = get_model_path('./results/coclep/res_model/',args)
-    torch.save(val_bst_f1_model, f'{bst_model_path}_f1.pkl')  # 存储最优的模型
-    torch.save(val_bst_pre_model,f'{bst_model_path}_pre.pkl') #存储最优pre的模型
-
-    #评估阶段
-    logger.info(f'#################### Starting evaluation######################')
-    #目前是加载具有最优pre的模型
-    if args.val_type == 'pre':
-        embLearner.load_state_dict(torch.load(f'{bst_model_path}_pre.pkl'))  # 加载模型
-    else:
-        embLearner.load_state_dict(torch.load(f'{bst_model_path}_f1.pkl'))  # 加载模型
-    embLearner.eval()
-
-    F1 = 0.0
-    Pre = 0.0
-    Rec = 0.0
-
-    nmi_score = 0.0
-    ari_score = 0.0
-    jac_score = 0.0
-    count = 0.0
-
-    eval_start = datetime.datetime.now()
-
-    with torch.no_grad():
-        #使用验证集数据找打最佳阈值s_
-        if args.val_type == 'f1':
-            s_, f1_ = validation(val, nodes_feats, embLearner, edge_index, edge_index_aug)
-            logger.info(f'evaluation time = {datetime.datetime.now() - eval_start}, best s_={s_}, best val f1_={f1_}')
-        elif args.val_type == 'pre':
-            s_, pre_ = validation_pre(val, nodes_feats, embLearner, edge_index, edge_index_aug)
-            logger.info(f'evaluation time = {datetime.datetime.now() - eval_start}, best s_={s_}, best val pre_={pre_}')
-        val_running_time = (datetime.datetime.now() - eval_start).seconds  # 结束了测试运行的时间
-        #开始测试
-        logger.info(f'#################### starting test  ####################')
-        test_start = datetime.datetime.now()
-        # 将找到的社区结果存入文件
-        comm_path = get_comm_path('./results/coclep/', args)
-        logger.info(f'找到的社区将被存入{comm_path}')
-        with open(comm_path, 'a', encoding='utf-8') as f:
-            for q, comm in test:
-                h = embLearner((q, None, edge_index, edge_index_aug, nodes_feats))
-                count = count + 1
-                sim = F.cosine_similarity(h[q].unsqueeze(0), h, dim=1)
-                simlists = torch.sigmoid(sim.squeeze(0)).to(torch.device('cpu')).numpy().tolist()
-
-                comm_find = []
-                for i, score in enumerate(simlists):
-                    if score >= s_ and i not in comm_find:  # 此时的阈值已经是前面找到的最优的阈值了
-                        comm_find.append(i)
-
-                comm_find = set(comm_find)
-                comm_find = list(comm_find)
-                #将找到的社区存入文件。
-                line = str(q) + "," + " ".join(str(u) for u in comm_find)
-                f.write(line + "\n")
-                comm = set(comm)
-                comm = list(comm)
-                f1, pre, rec = f1_score_(comm_find, comm)
-                F1 = F1 + f1  # 累加每个样本的F1,pre和rec
-                Pre = Pre + pre
-                Rec = Rec + rec
-                nmi = NMI_score(comm_find, comm, n_nodes)  # 计算当前样本的NMI
-                nmi_score = nmi_score + nmi  # 将当前样本的NMI累加
-
-                ari = ARI_score(comm_find, comm, n_nodes)  # 计算当前样本的ARI
-                ari_score = ari_score + ari  # 将当前样本的ARI累加
-
-                jac = JAC_score(comm_find, comm, n_nodes)  # 计算当前样本的JAC
-                jac_score = jac_score + jac  # 将当前样本的JAC累加
-    # 结束了测试阶段，计算测试集上的平均F1,Pre和Rec并打印
-    test_running_time = (datetime.datetime.now() - test_start).seconds  # 结束了测试运行的时间
-
-    F1 = F1 / len((test))
-    Pre = Pre / len((test))
-    Rec = Rec / len((test))
-    nmi_score = nmi_score / len(test)
-    ari_score = ari_score / len(test)
-    jac_score = jac_score / len(test)
-    logger.info(f'Test time = {test_running_time}')
-    logger.info(f'Test_set Avg：F1 = {F1}, Pre = {Pre}, Rec = {Rec}, s = {s_}')
-    logger.info(f'Test_set Avg NMI = {nmi_score}, ARI = {ari_score}, JAC = {jac_score}')
-
-    # 存储测试结果
-    output = get_res_path('./results/coclep/', args)
-    with open(output, 'a+',encoding='utf-8') as fh:
-        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        # f"best_comm_threshold: {s_}, best_validation_Avg_F1: {f1_}\n"
-        #这里都是单次运行的时间
-        line = (
-            f"args: {args}\n"
-            f"val_type:{args.val_type}"
-            f"bst_f1_epoch:{val_bst_f1_ep}, bst_ep_time:{val_bst_f1_time}, bst_ep_f1:{val_best_f1}\n"
-            f"bst_pre_epoch:{val_bst_pre_ep}, bst_ep_time:{val_bst_pre_time}, bst_ep_f1:{val_bst_pre}\n"
-            f"best_comm_threshold: {s_}\n"
-            f"pre_process_time: {pre_process_time}\n"
-            f"training_time: {training_time}\n"
-            f"val_time:{val_running_time}"
-            f"test_running_time: {test_running_time}\n"
-            f"F1: {F1}\n"
-            f"Pre: {Pre}\n"
-            f"Rec: {Rec}\n"
-            f"nmi_score: {nmi_score}\n"
-            f"ari_score: {ari_score}\n"
-            f"jac_score: {jac_score}\n"
-            f"current_time: {current_time}\n"
-            "----------------------------------------\n"
-        )
-        fh.write(line)
-        fh.close()
-    return F1, Pre, Rec, nmi_score, ari_score, jac_score, pre_process_time, training_time,val_time, test_running_time
-
-
 '''用这个做验证'''
 def Val_Community_Search(args,logger):
 
@@ -437,6 +235,12 @@ def Val_Community_Search(args,logger):
 
     #加载数据并移动到device
     nodes_feats, train, val, test, node_in_dim, n_nodes, edge_index, edge_index_aug, adj_matrix = load_citations(args)
+
+    # 归一化一次原始特征，后面直接用
+    X_norm = F.normalize(nodes_feats, p=2, dim=1).to(device)  # (N, d_x)
+
+
+
     logger.info(f'load_time = {datetime.datetime.now() - preprocess_start}, train len = {len(train)}')
     nodes_feats = nodes_feats.to(device)
     edge_index = edge_index.to(device)
@@ -473,16 +277,26 @@ def Val_Community_Search(args,logger):
         embLearner.load_state_dict(torch.load(f'{bst_model_path}_f1.pkl'))  # 加载模型
     embLearner.eval()
 
-    F1 = 0.0
-    Pre = 0.0
-    Rec = 0.0
-
-    nmi_score = 0.0
-    ari_score = 0.0
-    jac_score = 0.0
-    count = 0.0
-
     eval_start = datetime.datetime.now()
+    # intra_sum, inter_sum = 0.0, 0.0
+    # intra_cnt, inter_cnt = 0, 0
+    # all_nodes = torch.arange(n_nodes, device=device)
+
+    # ----------------------- 初始化两个统计器 -----------------------
+    intra_sum_H = inter_sum_H = 0.0
+    intra_cnt_H = inter_cnt_H = 0
+    intra_sum_X = inter_sum_X = 0.0
+    intra_cnt_X = inter_cnt_X = 0
+
+    intra_sum_H_sig = inter_sum_H_sig = 0.0
+    intra_cnt_H_sig = inter_cnt_H_sig = 0
+    intra_sum_X_sig = inter_sum_X_sig = 0.0
+    intra_cnt_X_sig = inter_cnt_X_sig = 0
+
+    pos_scores_raw, neg_scores_raw = [], []  # 点积 / 余弦
+    pos_scores_sig, neg_scores_sig = [], []  # sigmoid 后
+
+    all_nodes = torch.arange(n_nodes, device=device)
 
     with torch.no_grad():
         #使用验证集数据找打最佳阈值s_
@@ -493,82 +307,342 @@ def Val_Community_Search(args,logger):
             s_, pre_ = validation_pre(val, nodes_feats, embLearner, edge_index, edge_index_aug)
             logger.info(f'evaluation time = {datetime.datetime.now() - eval_start}, best s_={s_}, best val pre_={pre_}')
         val_running_time = (datetime.datetime.now() - eval_start).seconds  # 结束了测试运行的时间
-        #开始测试
+        logger.info(f'验证结束，用时：val_running_time')
         logger.info(f'#################### starting test  ####################')
-        test_start = datetime.datetime.now()
-        # 将找到的社区结果存入文件
-        comm_path = get_comm_path('./results/coclep/', args)
-        logger.info(f'找到的社区将被存入{comm_path}')
-        with open(comm_path, 'a', encoding='utf-8') as f:
-            for q, comm in test:
-                h = embLearner((q, None, edge_index, edge_index_aug, nodes_feats))
-                count = count + 1
-                sim = F.cosine_similarity(h[q].unsqueeze(0), h, dim=1)
-                simlists = torch.sigmoid(sim.squeeze(0)).to(torch.device('cpu')).numpy().tolist()
+        for q, comm in test:
+            h = embLearner((q, None, edge_index, edge_index_aug, nodes_feats))
+            # h = F.normalize(h, p=2, dim=1)
 
-                comm_find = []
-                for i, score in enumerate(simlists):
-                    if score >= s_ and i not in comm_find:  # 此时的阈值已经是前面找到的最优的阈值了
-                        comm_find.append(i)
+            comm_idx = torch.tensor(comm, device=h.device, dtype=torch.long)
+            out_idx = all_nodes[~torch.isin(all_nodes, comm_idx)]
 
-                comm_find = set(comm_find)
-                comm_find = list(comm_find)
-                #将找到的社区存入文件。
-                line = str(q) + "," + " ".join(str(u) for u in comm_find)
-                f.write(line + "\n")
-                comm = set(comm)
-                comm = list(comm)
-                f1, pre, rec = f1_score_(comm_find, comm)
-                F1 = F1 + f1  # 累加每个样本的F1,pre和rec
-                Pre = Pre + pre
-                Rec = Rec + rec
-                nmi = NMI_score(comm_find, comm, n_nodes)  # 计算当前样本的NMI
-                nmi_score = nmi_score + nmi  # 将当前样本的NMI累加
+            # ---- (1) 社区内两两相似 ----
+            if len(comm_idx) > 1:
+                h_c = h[comm_idx]  # (m,d)
+                h_c = F.normalize(h_c, p=2, dim=1) #
+                sims = torch.mm(h_c, h_c.T)
+                sims_sig = torch.sigmoid(sims)  # ★ 新增 sigmoid 映射
 
-                ari = ARI_score(comm_find, comm, n_nodes)  # 计算当前样本的ARI
-                ari_score = ari_score + ari  # 将当前样本的ARI累加
+                iu = torch.triu_indices(len(comm_idx), len(comm_idx), offset=1)
+                intra_sum_H += sims[iu[0], iu[1]].sum().item()
+                intra_cnt_H += iu.size(1)
 
-                jac = JAC_score(comm_find, comm, n_nodes)  # 计算当前样本的JAC
-                jac_score = jac_score + jac  # 将当前样本的JAC累加
-    # 结束了测试阶段，计算测试集上的平均F1,Pre和Rec并打印
-    test_running_time = (datetime.datetime.now() - test_start).seconds  # 结束了测试运行的时间
+                intra_sum_H_sig += sims_sig[iu[0], iu[1]].sum().item()
+                intra_cnt_H_sig += iu.size(1)
 
-    F1 = F1 / len((test))
-    Pre = Pre / len((test))
-    Rec = Rec / len((test))
-    nmi_score = nmi_score / len(test)
-    ari_score = ari_score / len(test)
-    jac_score = jac_score / len(test)
-    logger.info(f'Test time = {test_running_time}')
-    logger.info(f'Test_set Avg：F1 = {F1}, Pre = {Pre}, Rec = {Rec}, s = {s_}')
-    logger.info(f'Test_set Avg NMI = {nmi_score}, ARI = {ari_score}, JAC = {jac_score}')
+            # ---- (2) 社区↔外部 ----
+            h_out = h[out_idx]  # (n,d)
+            h_out = F.normalize(h_out, p=2, dim=1)
+            h_c = h[comm_idx]
+            h_c = F.normalize(h_c, p=2, dim=1)
+            sims2 = torch.mm(h_c, h_out.T)  # (m,n)
+            sims2_sig = torch.sigmoid(sims2)  # ★ 新增 sigmoid 映射
 
-    # 存储测试结果
-    output = get_res_path('./results/coclep/', args)
-    with open(output, 'a+',encoding='utf-8') as fh:
-        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        # f"best_comm_threshold: {s_}, best_validation_Avg_F1: {f1_}\n"
-        #这里都是单次运行的时间
-        line = (
-            f"args: {args}\n"
-            f"val_type:{args.val_type}"
-            f"best_comm_threshold: {s_}\n"
-            f"pre_process_time: {pre_process_time}\n"
-            f"val_time:{val_running_time}"
-            f"test_running_time: {test_running_time}\n"
-            f"F1: {F1}\n"
-            f"Pre: {Pre}\n"
-            f"Rec: {Rec}\n"
-            f"nmi_score: {nmi_score}\n"
-            f"ari_score: {ari_score}\n"
-            f"jac_score: {jac_score}\n"
-            f"current_time: {current_time}\n"
-            "----------------------------------------\n"
-        )
-        fh.write(line)
-        fh.close()
-    return F1, Pre, Rec, nmi_score, ari_score, jac_score, pre_process_time,val_time, test_running_time
+            inter_sum_H += sims2.sum().item()
+            inter_cnt_H += sims2.numel()
 
+            inter_sum_H_sig += sims2_sig.sum().item()
+            inter_cnt_H_sig += sims2_sig.numel()
+
+            # ---------- 2) 原始特征 X ----------
+            X_c = X_norm[comm_idx]  # (m, d_x)
+            X_out = X_norm[out_idx]  # (n, d_x)
+
+            if len(comm_idx) > 1:
+                sims_x = torch.mm(X_c, X_c.T)
+                sims_x_sig = torch.sigmoid(sims_x)
+                iu_x = torch.triu_indices(len(comm_idx), len(comm_idx), offset=1)
+                intra_sum_X += sims_x[iu_x[0], iu_x[1]].sum().item()
+                intra_cnt_X += iu_x.size(1)
+                intra_sum_X_sig += sims_x_sig[iu_x[0], iu_x[1]].sum().item()
+                intra_cnt_X_sig += iu_x.size(1)
+
+            sims2_x = torch.mm(X_c, X_out.T)
+            sims2_x_sig = torch.sigmoid(sims2_x)
+            inter_sum_X += sims2_x.sum().item()
+            inter_cnt_X += sims2_x.numel()
+
+            inter_sum_X_sig += sims2_x_sig.sum().item()
+            inter_cnt_X_sig += sims2_x_sig.numel()
+        # ----------------------- 计算平均值 -----------------------
+        μ_intra_H = intra_sum_H / intra_cnt_H
+        μ_inter_H = inter_sum_H / inter_cnt_H
+        μ_intra_X = intra_sum_X / intra_cnt_X
+        μ_inter_X = inter_sum_X / inter_cnt_X
+
+        μ_intra_H_sig = intra_sum_H_sig / intra_cnt_H_sig
+        μ_inter_H_sig = inter_sum_H_sig / inter_cnt_H_sig
+        μ_intra_X_sig = intra_sum_X_sig / intra_cnt_X_sig
+        μ_inter_X_sig = inter_sum_X_sig / inter_cnt_X_sig
+
+        logger.info(f"H:  μ_intra={μ_intra_H:.4f}, μ_inter={μ_inter_H:.4f}")
+        logger.info(f"H(sigmoid):  μ_intra={μ_intra_H_sig:.4f}, μ_inter={μ_inter_H_sig:.4f}")
+        logger.info(f"X:  μ_intra={μ_intra_X:.4f}, μ_inter={μ_inter_X:.4f}")
+        logger.info(f"X(sigmoid):  μ_intra={μ_intra_X_sig:.4f}, μ_inter={μ_inter_X_sig:.4f}")
+
+        return μ_intra_H, μ_inter_H, μ_intra_X, μ_inter_X
+
+
+def Val_Community_Search_zhifang(args,logger):
+
+    preprocess_start = datetime.datetime.now()
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    logger.info(f'device: {device}')
+
+    #加载数据并移动到device
+    nodes_feats, train, val, test, node_in_dim, n_nodes, edge_index, edge_index_aug, adj_matrix = load_citations(args)
+
+    # 归一化一次原始特征，后面直接用
+    X_norm = F.normalize(nodes_feats, p=2, dim=1).to(device)  # (N, d_x)
+
+
+
+    logger.info(f'load_time = {datetime.datetime.now() - preprocess_start}, train len = {len(train)}')
+    nodes_feats = nodes_feats.to(device)
+    edge_index = edge_index.to(device)
+    edge_index_aug = edge_index_aug.to(device)
+
+    #创建节点嵌入学习模型
+    if args.method == 'EmbLearner':
+        embLearner = EmbLearner(node_in_dim, args.hidden_dim, args.num_layers, args.drop_out, args.tau, device,args.alpha, args.lam, args.k)  # COCLEP中的模型
+
+    elif args.method == '':
+        embLearner = EmbLearnerWithoutHyper(node_in_dim, args.hidden_dim, args.num_layers, args.drop_out, args.tau,device, args.alpha, args.lam, args.k)  # 去掉COCLEP中的超图视图，但得到的结果很差
+
+    elif args.method == 'COCLE':  #这个是初始最默认的算法
+        embLearner = COCLE(node_in_dim, args.hidden_dim, args.num_layers, args.drop_out, args.tau, device, args.alpha, args.lam, args.k) #COCLEP中的模型，目前和EmbLearner是一样的
+
+    elif args.method == 'EmbLearnerwithWeights': #将这个作为我的
+        embLearner = EmbLearnerwithWeights(node_in_dim, args.hidden_dim,args.num_layers,args.drop_out,args.tau,device,args.alpha,args.lam,args.k) #传入edge_weight参数的模型
+    else:
+        raise ValueError(f'method {args.method} not supported')
+
+    logger.info(f'embLearner: {args.method}')
+
+    emb_optim = torch.optim.Adam(embLearner.parameters(), lr=args.lr,weight_decay=args.weight_decay)
+    embLearner.to(device)
+
+
+    logger.info(f'#################### Starting evaluation######################')
+    #加载模型参数
+    bst_model_path = get_model_path('./results/coclep/res_model/',args)
+    #目前是加载具有最优pre的模型
+    if args.val_type == 'pre':
+        embLearner.load_state_dict(torch.load(f'{bst_model_path}_pre.pkl'))  # 加载模型
+    else:
+        embLearner.load_state_dict(torch.load(f'{bst_model_path}_f1.pkl'))  # 加载模型
+    embLearner.eval()
+
+    eval_start = datetime.datetime.now()
+    # intra_sum, inter_sum = 0.0, 0.0
+    # intra_cnt, inter_cnt = 0, 0
+    # all_nodes = torch.arange(n_nodes, device=device)
+
+    # ----------------------- 初始化两个统计器 -----------------------
+    intra_sum_H = inter_sum_H = 0.0
+    intra_cnt_H = inter_cnt_H = 0
+    intra_sum_X = inter_sum_X = 0.0
+    intra_cnt_X = inter_cnt_X = 0
+
+    intra_sum_H_sig = inter_sum_H_sig = 0.0
+    intra_cnt_H_sig = inter_cnt_H_sig = 0
+    intra_sum_X_sig = inter_sum_X_sig = 0.0
+    intra_cnt_X_sig = inter_cnt_X_sig = 0
+
+    pos_scores_raw, neg_scores_raw = [], []  # 点积 / 余弦
+    pos_scores_sig, neg_scores_sig = [], []  # sigmoid 后
+
+    all_nodes = torch.arange(n_nodes, device=device)
+
+    with torch.no_grad():
+        #使用验证集数据找打最佳阈值s_
+        if args.val_type == 'f1':
+            s_, f1_ = validation(val, nodes_feats, embLearner, edge_index, edge_index_aug)
+            logger.info(f'evaluation time = {datetime.datetime.now() - eval_start}, best s_={s_}, best val f1_={f1_}')
+        elif args.val_type == 'pre':
+            s_, pre_ = validation_pre(val, nodes_feats, embLearner, edge_index, edge_index_aug)
+            logger.info(f'evaluation time = {datetime.datetime.now() - eval_start}, best s_={s_}, best val pre_={pre_}')
+        val_running_time = (datetime.datetime.now() - eval_start).seconds  # 结束了测试运行的时间
+        logger.info(f'验证结束，用时：val_running_time')
+        logger.info(f'#################### starting test  ####################')
+        for q, comm in test:
+            h = embLearner((q, None, edge_index, edge_index_aug, nodes_feats))
+            # h = F.normalize(h, p=2, dim=1) #方便直接用点积=余弦
+            comm_idx = torch.tensor(comm, device=h.device, dtype=torch.long)
+            out_idx = all_nodes[~torch.isin(all_nodes, comm_idx)]
+
+            # ---- (1) 社区内两两相似 ----
+            if len(comm_idx) > 1:
+                h_c = h[comm_idx]  # (m,d)
+                h_c = F.normalize(h_c, p=2, dim=1) #
+                sims = torch.mm(h_c, h_c.T)
+                sims_sig = torch.sigmoid(sims)  # ★ 新增 sigmoid 映射
+
+                iu = torch.triu_indices(len(comm_idx), len(comm_idx), offset=1)
+
+                # 用于画直方图
+                pos_raw = sims[iu[0], iu[1]]  # (m·(m-1)/2, )
+                pos_scores_raw.extend(pos_raw.tolist())
+                pos_scores_sig.extend(torch.sigmoid(pos_raw).tolist())
+
+                intra_sum_H += sims[iu[0], iu[1]].sum().item()
+                intra_cnt_H += iu.size(1)
+
+                intra_sum_H_sig += sims_sig[iu[0], iu[1]].sum().item()
+                intra_cnt_H_sig += iu.size(1)
+
+            # ---- (2) 社区↔外部 ----
+            h_out = h[out_idx]  # (n,d)
+            h_out = F.normalize(h_out, p=2, dim=1)
+            h_c = h[comm_idx]
+            h_c = F.normalize(h_c, p=2, dim=1)
+            sims2 = torch.mm(h_c, h_out.T)  # (m,n)
+            #用于画直方图
+            neg_raw = sims2.flatten()
+            neg_scores_raw.extend(neg_raw.tolist())
+            neg_scores_sig.extend(torch.sigmoid(neg_raw).tolist())
+
+            sims2_sig = torch.sigmoid(sims2)  # ★ 新增 sigmoid 映射
+
+            inter_sum_H += sims2.sum().item()
+            inter_cnt_H += sims2.numel()
+
+            inter_sum_H_sig += sims2_sig.sum().item()
+            inter_cnt_H_sig += sims2_sig.numel()
+
+            # ---------- 2) 原始特征 X ----------
+            X_c = X_norm[comm_idx]  # (m, d_x)
+            X_out = X_norm[out_idx]  # (n, d_x)
+
+            if len(comm_idx) > 1:
+                sims_x = torch.mm(X_c, X_c.T)
+                sims_x_sig = torch.sigmoid(sims_x)
+                iu_x = torch.triu_indices(len(comm_idx), len(comm_idx), offset=1)
+                intra_sum_X += sims_x[iu_x[0], iu_x[1]].sum().item()
+                intra_cnt_X += iu_x.size(1)
+                intra_sum_X_sig += sims_x_sig[iu_x[0], iu_x[1]].sum().item()
+                intra_cnt_X_sig += iu_x.size(1)
+
+            sims2_x = torch.mm(X_c, X_out.T)
+            sims2_x_sig = torch.sigmoid(sims2_x)
+            inter_sum_X += sims2_x.sum().item()
+            inter_cnt_X += sims2_x.numel()
+
+            inter_sum_X_sig += sims2_x_sig.sum().item()
+            inter_cnt_X_sig += sims2_x_sig.numel()
+        # ----------------------- 计算平均值 -----------------------
+        μ_intra_H = intra_sum_H / intra_cnt_H
+        μ_inter_H = inter_sum_H / inter_cnt_H
+        μ_intra_X = intra_sum_X / intra_cnt_X
+        μ_inter_X = inter_sum_X / inter_cnt_X
+
+        μ_intra_H_sig = intra_sum_H_sig / intra_cnt_H_sig
+        μ_inter_H_sig = inter_sum_H_sig / inter_cnt_H_sig
+        μ_intra_X_sig = intra_sum_X_sig / intra_cnt_X_sig
+        μ_inter_X_sig = inter_sum_X_sig / inter_cnt_X_sig
+
+        logger.info(f"H:  μ_intra={μ_intra_H:.4f}, μ_inter={μ_inter_H:.4f}")
+        logger.info(f"H(sigmoid):  μ_intra={μ_intra_H_sig:.4f}, μ_inter={μ_inter_H_sig:.4f}")
+        logger.info(f"X:  μ_intra={μ_intra_X:.4f}, μ_inter={μ_inter_X:.4f}")
+        logger.info(f"X(sigmoid):  μ_intra={μ_intra_X_sig:.4f}, μ_inter={μ_inter_X_sig:.4f}")
+
+        # -------- (3) 绘图(示例) --------
+        print('开始绘图')
+
+        # ---------- 1) 保存原始打分（4 组） ----------
+        os.makedirs("Visual/tongji", exist_ok=True)
+
+        np.savetxt("Visual/tongji/pos_scores_raw.txt", np.array(pos_scores_raw), fmt="%.6f")
+        np.savetxt("Visual/tongji/neg_scores_raw.txt", np.array(neg_scores_raw), fmt="%.6f")
+        np.savetxt("Visual/tongji/pos_scores_sig.txt", np.array(pos_scores_sig), fmt="%.6f")
+        np.savetxt("Visual/tongji/neg_scores_sig.txt", np.array(neg_scores_sig), fmt="%.6f")
+
+        logger.info("✅ 已导出原始分数字符串到 Visual/tongji/*.txt")
+
+        # ---------- 2) 如需提前算好直方图 ----------
+        # 这里用 50 个 bin（-1~1），你可按需修改
+        bins = np.linspace(-1, 1, 51)  # 50 bins => 51 个分割点
+        centers = 0.5 * (bins[:-1] + bins[1:])  # bin 中心
+
+        hist_pos_raw, _ = np.histogram(pos_scores_raw, bins=bins)
+        hist_neg_raw, _ = np.histogram(neg_scores_raw, bins=bins)
+
+        hist_pos_sig, _ = np.histogram(pos_scores_sig, bins=np.linspace(0, 1, 51))
+        hist_neg_sig, _ = np.histogram(neg_scores_sig, bins=np.linspace(0, 1, 51))
+
+        # 保存 raw 直方图
+        df_raw = pd.DataFrame({
+            "bin_center": centers,
+            "pos_count": hist_pos_raw,
+            "neg_count": hist_neg_raw
+        })
+        df_raw.to_csv("Visual/tongji/hist_raw.csv", index=False)
+
+        # 保存 sigmoid 直方图（注意中心 0~1）
+        df_sig = pd.DataFrame({
+            "bin_center": 0.5 * (np.linspace(0, 1, 51)[:-1] + np.linspace(0, 1, 51)[1:]),
+            "pos_count": hist_pos_sig,
+            "neg_count": hist_neg_sig
+        })
+        df_sig.to_csv("Visual/tongji/hist_sigmoid.csv", index=False)
+
+        logger.info("✅ 已导出直方图计数到 export/hist_*.csv")
+
+        # plot_histogram_save(
+        #     pos_scores_raw, neg_scores_raw,
+        #     title="Raw cosine similarity distribution",
+        #     xlabel="cosine similarity", bins=50,
+        #     save_path="Visual/tongji/raw_sim_hist.png"  # 👈 指定文件名
+        # )
+        #
+        # plot_histogram_save(
+        #     pos_scores_sig, neg_scores_sig,
+        #     title="Sigmoid-mapped similarity distribution",
+        #     xlabel="sigmoid(sim)", bins=50,
+        #     save_path="Visual/tongji/sigmoid_sim_hist.png"
+        # )
+        # # plot_histogram(
+        #     pos_scores_raw, neg_scores_raw,
+        #     title="Raw cosine similarity distribution",
+        #     xlabel="cosine similarity", bins=50
+        # )
+        # plot_histogram(
+        #     pos_scores_sig, neg_scores_sig,
+        #     title="Sigmoid-mapped similarity distribution",
+        #     xlabel="sigmoid(sim)", bins=50
+        # )
+        return μ_intra_H, μ_inter_H, μ_intra_X, μ_inter_X
+
+
+def plot_histogram_save(pos, neg, title, xlabel, bins=50, save_path=None):
+    plt.figure(figsize=(6, 4))
+    plt.hist(pos, bins=bins, alpha=0.6, label="intra (positive)", density=True)
+    plt.hist(neg, bins=bins, alpha=0.6, label="inter (negative)", density=True)
+    plt.xlabel(xlabel)
+    plt.ylabel("density")
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+
+    if save_path is None:          # 如果没给路径就拼一个
+        safe_title = title.lower().replace(" ", "_")
+        save_path = f"{safe_title}.png"
+
+    os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+    plt.savefig(save_path, dpi=300)
+    plt.close()                    # 释放内存 / 不阻塞
+
+
+def plot_histogram(pos, neg, title, xlabel, bins=50):
+    plt.figure(figsize=(6, 4))
+    plt.hist(pos, bins=bins, alpha=0.6, label="intra (positive)", density=True)
+    plt.hist(neg, bins=bins, alpha=0.6, label="inter (negative)", density=True)
+    plt.xlabel(xlabel)
+    plt.ylabel("density")
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
@@ -585,14 +659,14 @@ if __name__ == '__main__':
     parser.add_argument('--m_model_path', type=str, default='META')
 
     # 数据集选项
-    parser.add_argument('--dataset', type=str, default='citeseer')
+    parser.add_argument('--dataset', type=str, default='cora')
     # 训练集、验证集、测试集大小，以及相应的文件路径，节点特征存储路径
     parser.add_argument('--train_size', type=int, default=300)
     parser.add_argument('--val_size', type=int, default=100)
     parser.add_argument('--test_size', type=int, default=500)
-    parser.add_argument('--train_path', type=str, default='pos_train')
-    parser.add_argument('--test_path', type=str, default='test')
-    parser.add_argument('--val_path', type=str, default='val')
+    parser.add_argument('--train_path', type=str, default='3_pos_train')
+    parser.add_argument('--test_path', type=str, default='3_test')
+    parser.add_argument('--val_path', type=str, default='3_val')
     parser.add_argument('--feats_path', type=str, default='feats.txt')
     parser.add_argument('--val_type', type=str, default='f1',help='pre or f1 to val')
     # 控制攻击方法、攻击类型和攻击率
@@ -641,91 +715,6 @@ if __name__ == '__main__':
     else:
         logger = get_logger()
 
-    # 预处理时间，模型训练时间，测试时间
-    pre_process_time_A, train_model_running_time_A,val_time_A, test_running_time_A = 0.0, 0.0,0.0, 0.0
-    count = 0
-    F1lists = []
-    Prelists = []
-    Reclists = []
-    nmi_scorelists = []
-    ari_scorelists = []
-    jac_scorelists = []
-
-    for i in range (args.count):
-        count = count + 1
-        # logger.info('='*20)
-        now = datetime.datetime.now()
-        logger.info(f'##第 {count} 次执行, Starting Time: {now.strftime("%Y-%m-%d %H:%M:%S")}')
-
-        #执行社区搜索
-        F1, Pre, Rec, nmi_score, ari_score, jac_score, pre_process_time, train_model_running_time,val_time,test_running_time = \
-            Community_Search(args,logger)
-
-        # 打印结束时间
-        logger.info(f'##第{count}次Finishing Time: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
-        running_time = (datetime.datetime.now() - now).seconds
-        # 打印总的运行时间
-        logger.info(f'##第{count}次Running Time(s): {running_time}')
-        print('= ' * 20)
-
-        F1lists.append(F1)
-        Prelists.append(Pre)
-        Reclists.append(Rec)
-        nmi_scorelists.append(nmi_score)
-        ari_scorelists.append(ari_score)
-        jac_scorelists.append(jac_score)
-        # 累计预处理时间、训练时间和测试时间
-        pre_process_time_A = pre_process_time_A + pre_process_time
-        train_model_running_time_A = train_model_running_time_A + train_model_running_time
-        val_time_A = val_time_A+val_time
-        test_running_time_A = test_running_time_A + test_running_time
-
-    # 计算count次数的各个评价指标的均值和方差
-    F1_std = np.std(F1lists)
-    F1_mean = np.mean(F1lists)
-    Pre_std = np.std(Prelists)
-    Pre_mean = np.mean(Prelists)
-    Rec_std = np.std(Reclists)
-    Rec_mean = np.mean(Reclists)
-    nmi_std = np.std(nmi_scorelists)
-    nmi_mean = np.mean(nmi_scorelists)
-    ari_std = np.std(ari_scorelists)
-    ari_mean = np.mean(ari_scorelists)
-    jac_std = np.std(jac_scorelists)
-    jac_mean = np.mean(jac_scorelists)
-
-    # 计算平均每次社区搜索的各个时间
-    pre_process_time_A = pre_process_time_A / float(args.count)
-    train_model_running_time_A = train_model_running_time_A / float(args.count)
-    val_time_A = val_time_A / float(args.count)
-    test_running_time_A = test_running_time_A / float(args.count) #除以平均次数
-    single_query_time = test_running_time_A/float(args.test_size)  #除以测试集大小得到测试时间
-    # 将得到的结果进行存储，此时存储的是多次的average的各个指标。
-    # 存储测试结果
-    output = get_res_path('./results/coclep/', args)
-    with open(output, 'a+',encoding='utf-8') as fh:  # 记录的是 count 次的各个平均结果
-        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        line = (
-            f"average {args}\n"
-            f"pre_process_time: {pre_process_time_A}\n"
-            f"train_model_running_time: {train_model_running_time_A}\n"
-            f"val_time_A: {val_time_A}\n"
-            f"test_running_time: {test_running_time_A}\n"
-            f"single_query_time: {single_query_time}\n"
-            f"F1 mean: {F1_mean}\n"
-            f"F1 std: {F1_std}\n"
-            f"Pre mean: {Pre_mean}\n"
-            f"Pre std: {Pre_std}\n"
-            f"Rec mean: {Rec_mean}\n"
-            f"Rec std: {Rec_std}\n"
-            f"nmi_score mean: {nmi_mean}\n"
-            f"nmi std: {nmi_std}\n"
-            f"ari_score mean: {ari_mean}\n"
-            f"ari std: {ari_std}\n"
-            f"jac mean: {jac_mean}\n"
-            f"jac std: {jac_std}\n"
-            f"current_time: {current_time}\n"
-            "----------------------------------------\n"
-        )
-        fh.write(line)
-        fh.close()
+    μ_intra_H, μ_inter_H, μ_intra_X, μ_inter_X = Val_Community_Search_zhifang(args, logger)
+    print(f"{args.dataset}_{args.attack}_{args.ptb_rate}：μ_intra_H = {μ_intra_H:.4f},  μ_inter = {μ_inter_H:.4f}")
+    print(f"{args.dataset}_{args.attack}_{args.ptb_rate}：μ_intra_x = {μ_intra_X:.4f},  μ_inter = {μ_inter_X:.4f}")

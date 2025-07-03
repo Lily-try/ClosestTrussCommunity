@@ -141,6 +141,26 @@ class GSRConfig(ModelConfig):
                 'window_size': 11,
                 'walk_length': 100,
             },
+            'photo': {
+                'num_walks': 12,
+                'window_size': 11,
+                'walk_length': 100,
+            },
+            'dblp': {
+                'num_walks': 12,
+                'window_size': 11,
+                'walk_length': 100,
+            },
+            'amazon': {
+                'num_walks': 12,
+                'window_size': 11,
+                'walk_length': 100,
+            },
+            'facebook': {
+                'num_walks': 12,
+                'window_size': 11,
+                'walk_length': 100,
+            },
             'flickr': {
                 'num_walks': 12,
                 'window_size': 11,

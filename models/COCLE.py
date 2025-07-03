@@ -226,20 +226,19 @@ class COCLE(nn.Module):
     def aug_first_att_layer(self, x):
         return torch.matmul(x, self.aug_first_att.to(self.device))
 
-    def hyperedge_representation(self, x, edge_index):
+    def hyperedge_representation(self, x, edge_index,batch_size = 512):
         '''
         将节点嵌入转换成超边表示
         :param x:
         :param edge_index:
         :return:
         '''
-        #h = self.mlp2(x)
-        h = x#torch.tanh(self.att(x))  将节点特征分配给h
+       ## h = self.mlp2(x)
+        h = x #torch.tanh(self.att(x))  将节点特征分配给h
         edges = h[edge_index[0]] #从h中提取与超边相关的节点特征？？？
         nodes = h[edge_index[1]] #从h中提取与超边连接的其他的节点特征？？？
 
         sim = torch.exp(torch.cosine_similarity(edges, nodes)) #计算相似度，然后通过指数函数转化
-
         denominator = scatter(sim, edge_index[1], dim=0, reduce='sum') #对'sim'进行汇总，以计算每个超边的分母
         denominator = denominator[edge_index[1]] #将分母按照edge_index[1]超边重新排列，以便与每个超边关联
         sim = (sim/denominator).unsqueeze(1) #将sim初一分母denominator,并将结果加入到一个新的维度，得到归一化的相似性得分。
@@ -248,6 +247,40 @@ class COCLE(nn.Module):
         edges_ = sim * (edges_)
 
         hyperedge = scatter(edges_, edge_index[1], dim=0, reduce='sum') #hyperedge = torch.cat([x, hyperedge], 1)
+
+        # h = x
+        # edge_src = edge_index[0]
+        # edge_dst = edge_index[1]
+        #
+        # edges_ = []
+        # sims_ = []
+        #
+        # for i in range(0, edge_src.size(0), batch_size):
+        #     # 分批获取边的起点和终点
+        #     src_batch = edge_src[i:i + batch_size]
+        #     dst_batch = edge_dst[i:i + batch_size]
+        #
+        #     h_src = h[src_batch]  # (B, d)
+        #     h_dst = h[dst_batch]  # (B, d)
+        #
+        #     # 计算余弦相似度并归一化
+        #     sim = F.cosine_similarity(h_src, h_dst, dim=1)  # (B,)
+        #     sim = torch.exp(sim)
+        #
+        #     sims_.append(sim)
+        #     edges_.append(h_src * sim.unsqueeze(1))  # (B, d)
+        #
+        # sims = torch.cat(sims_, dim=0)
+        # weighted_edges = torch.cat(edges_, dim=0)
+        #
+        # # scatter normalization
+        # denominator = scatter(sims, edge_dst, dim=0, reduce='sum')
+        # sim_normed = sims / (denominator[edge_dst] + 1e-10)  # 防止除0
+        # weighted_edges = x[edge_src] * sim_normed.unsqueeze(1)
+        #
+        # # 聚合得到超边表示
+        # hyperedge = scatter(weighted_edges, edge_dst, dim=0, reduce='sum')
+
 
         return hyperedge
 
@@ -391,6 +424,10 @@ class COCLE(nn.Module):
         '''
         #获取数据
         q,pos,edge_index,edge_index_aug,feats =train
+        if edge_index.dtype != torch.long:
+            edge_index = edge_index.long()
+            edge_index_aug = edge_index_aug.long()
+            print('出现了不是long的')
         querys = torch.zeros(feats.shape[0], 1).to(self.device)
         querys[q] = 1.0
 

@@ -4,13 +4,19 @@ def parameter_parser():
    
     parser = argparse.ArgumentParser(description = "Run .")
     parser.add_argument('--root', type=str, default='../data')
-
+    parser.add_argument("--dataset",
+                        nargs="?",
+                        default='amazon',
+                        help="The name of data set. Default is cora.")
     # 控制攻击方法、攻击类型和攻击率
-    parser.add_argument('--attack', type=str, default='random_add', choices=['none', 'random_add','random_flip','random_remove','cdelm','flipm', 'meta_attack','add','del','gflipm','gdelm'])
-    parser.add_argument('--ptb_rate', type=float, default=0.20, help='pertubation rate')
+    #choices=['none', 'random_add','random_flip','random_remove','cdelm','flipm', 'meta_attack','add','del','gflipm','gdelm']
+    parser.add_argument('--attack', type=str, default='random_add')
+    parser.add_argument('--ptb_rate', type=float, default=0.40, help='pertubation rate')
     parser.add_argument('--type', type=str, default='add', help='random attack type', choices=['add', 'remove', 'flip'])
     parser.add_argument('--noise_level', type=int, default=2, choices=[1, 2, 3], help='noisy level')
-
+    parser.add_argument('--count', type=int, default=2, help='noisy level')
+    parser.add_argument('--test_size', type=int, default=500)
+    parser.add_argument('--test_path', type=str, default='3_test')
     parser.add_argument("--epochs",
                         type = int,
                         default = 200,
@@ -27,10 +33,7 @@ def parameter_parser():
                         type = float,
                         default = 0.01,
 	                    help = "Learning rate. Default is 0.01.")
-    parser.add_argument("--dataset",
-                        nargs="?",
-                        default='cora',
-                        help="The name of data set. Default is cora.")
+
     parser.add_argument("--community-size",  #限制了找到的社区大小最多为30
                         type=int,
                         default=30,

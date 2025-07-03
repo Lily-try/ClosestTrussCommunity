@@ -4,6 +4,7 @@
 # Author: Jiezhong Qiu
 # Create Time: 2019/12/30 14:20
 import os
+from collections import Counter
 
 import scipy
 from ogb.nodeproppred import DglNodePropPredDataset
@@ -43,6 +44,45 @@ def stratified_train_test_split(label_idx, labels, num_nodes, train_rate, seed=2
     valid_idx, test_idx = train_test_split(
         test_and_valid_idx, test_size=.5, random_state=seed, shuffle=True, stratify=labels[test_and_valid_idx])
     return train_idx, valid_idx, test_idx,num_train_nodes
+
+
+def stratified_train_test_split_fb(label_idx, labels, num_nodes, train_rate, seed=2021):
+    """
+    :param label_idx: 可用于训练/划分的样本索引
+    :param labels: 全体标签（np.array）
+    :param num_nodes: 节点总数（用于计算训练集规模）
+    :param train_rate: 百分比（如 5 表示 5%）
+    :return: train_idx, val_idx, test_idx, num_train_nodes
+    """
+
+    # 1. 计算要取多少训练节点
+    num_train_nodes = int(train_rate / 100 * num_nodes)
+
+    # 2. 过滤掉类别数量为1的样本
+    label_counts = Counter(labels.tolist())
+    valid_indices = np.array([i for i in label_idx if label_counts[labels[i]] > 1])
+
+    if len(valid_indices) < len(label_idx):
+        print(f"过滤掉标签数为 1 的类别样本：{len(label_idx) - len(valid_indices)} 个")
+
+    # 3. 提取对应的 labels
+    filtered_labels = labels[valid_indices]
+
+    # 4. 检查类别数是否大于训练集容量
+    num_classes = len(set(filtered_labels.tolist()))
+    if num_train_nodes < num_classes:
+        raise ValueError(f"Train size = {num_train_nodes} 小于类别数 = {num_classes}，无法分层抽样。")
+
+    # 5. 执行分层划分
+    test_rate_in_labeled_nodes = (len(filtered_labels) - num_train_nodes) / len(filtered_labels)
+    train_idx, test_and_valid_idx = train_test_split(
+        valid_indices, test_size=test_rate_in_labeled_nodes, random_state=seed, shuffle=True, stratify=filtered_labels)
+
+    valid_labels = labels[test_and_valid_idx]
+    valid_idx, test_idx = train_test_split(
+        test_and_valid_idx, test_size=0.5, random_state=seed, shuffle=True, stratify=valid_labels)
+
+    return train_idx, valid_idx, test_idx, num_train_nodes
 
 def save_split_indices(dataset, root, train_idx, val_idx, test_idx):
     save_dir = os.path.join(root, dataset,'gsr')
@@ -141,11 +181,11 @@ def save_split_indices(dataset, root, train_idx, val_idx, test_idx):
 #     return g, features, features.shape[1], nclass, labels, train, val, test
 
 
-def load_features(root,dataset):
+def load_features(root,dataset,valid_node_ids=None):
     if dataset in ['cora', 'pubmed', 'citeseer']:
         nodes_feats = citation_feature_reader(root, dataset)  # numpy.ndaaray:(2708,1433)
         nodes_feats = scipy.sparse.csr_matrix(nodes_feats)
-    elif dataset in ['cocs', 'photo', 'dblp', 'physics', 'reddit', 'texas', 'wisconsin']:
+    elif dataset in ['cocs', 'photo', 'dblp', 'physics', 'reddit', 'texas', 'wisconsin','amazon']:
         with open(f'{root}/{dataset}/{dataset}.feats', "r") as f:
             # 每行特征转换为列表，然后堆叠为 ndarray
             nodes_feats = np.array([list(map(float, line.strip().split())) for line in f])
@@ -156,6 +196,10 @@ def load_features(root,dataset):
     else: #这个是源码自己使用的
         nodes_feats = scipy.sparse.load_npz('./ptb_graphs/%s_features.npz' % (dataset))
     print(f'{dataset} nodes_feats type:{type(nodes_feats)}, nodes_feats shape:{nodes_feats.shape}')
+
+    # 保留图中存在的节点特征（根据 valid_node_ids 筛选）
+    if valid_node_ids is not None:
+        nodes_feats = nodes_feats[valid_node_ids]
 
     # 如果是稀疏矩阵，转为 dense 后再转 tensor
     if scipy.sparse.issparse(nodes_feats):
@@ -195,7 +239,7 @@ def load_adj(root,dataset,attack,ptb_rate): #torch.Tenso
     #     n_nodes = graphx.number_of_nodes()
     # else:
     #     raise ValueError(f'Unsupported attack type:{attack}')
-    print(f'{root}{dataset}{attack}{ptb_rate}')
+    print(f'{root}/{dataset}/{attack}/{dataset}_{attack}_{ptb_rate}.npz')
     graphx,n_nodes = load_graph(root,dataset,attack,ptb_rate)
     #需要节点是从0开始的连续编号？
     #将其转换成DGLGraph
@@ -232,9 +276,14 @@ def load_labels(root,dataset,n_nodes):
         all_nodes = [node for nodes in communities.values() for node in nodes]
         n_nodes = max(all_nodes) + 1
     labels = [-1] * n_nodes  # 先填 -1 表示未分配的节点（可选）
-    for label, node_list in communities.items():
+    for label, node_list in communities.items(): #对于当前这个label
+        # print(f'标签{label}的节点数量{len(node_list)}')
         for node in node_list:
-            labels[node] = label
+            # labels[node] = label
+            if node < n_nodes:  # ✅ 只给实际存在的节点赋 label
+                labels[node] = label
+            else:
+                print(f"[Warning] Node {node} exceeds max graph node id ({n_nodes - 1}) and is skipped.")
     # 检查是否还有未分配的节点
     if -1 in labels:
         print("Warning: some nodes were not assigned to any community.")
@@ -243,8 +292,9 @@ def load_labels(root,dataset,n_nodes):
 def preprocess_data(root,dataset,attack,ptb_rate,train_percentage=0):
     #1.加载邻接矩阵并创建dgl图
     g = load_adj(root,dataset,attack,ptb_rate)
+    valid_node_ids = sorted(g.nodes())  # 实际存在的节点编号
     #2.加载节点特征
-    features = load_features(root,dataset)
+    features = load_features(root,dataset,valid_node_ids=valid_node_ids)
     #3.加载节点标签数据
     labels = load_labels(root,dataset,g.num_nodes())
     nclass = len(set(labels.tolist()))
@@ -260,7 +310,120 @@ def preprocess_data(root,dataset,attack,ptb_rate,train_percentage=0):
         print('正在重新生成训练集')
         if th.is_tensor(labels):
             labels = labels.numpy()
-        train,val,test,num_train_nodes =  stratified_train_test_split(np.arange(len(labels)), labels, len(labels),train_percentage)
+
+        from collections import Counter
+        label_counter = Counter(labels)
+
+        # 保留样本数≥2的类别
+        valid_idx = np.array(
+            [i for i, y in enumerate(labels) if label_counter[y] >= 2],
+            dtype=int
+        )
+        # 记录样本数<2 的节点（直接放到 test 集）
+        rare_idx = np.array(
+            [i for i, y in enumerate(labels) if label_counter[y] < 2],
+            dtype=int
+        )
+
+        if len(rare_idx):
+            print(f'警告：{len(rare_idx)} 个节点所属的类别仅出现 1 次，'
+                  '将全部划入测试集，避免 stratify 报错。')
+            # 只在 valid_idx 上做分层抽样
+            train, val, test, num_train_nodes = stratified_train_test_split(
+                valid_idx,
+                labels[valid_idx],
+                len(valid_idx),
+                train_percentage
+            )
+            # 把稀有类别节点并入测试集
+            test = np.concatenate([test, rare_idx])
+        else:
+            train, val, test, num_train_nodes = stratified_train_test_split(
+                np.arange(len(labels)),
+                labels,
+                len(labels),
+                train_percentage
+            )
+
+        # train,val,test,num_train_nodes =  stratified_train_test_split(np.arange(len(labels)), labels, len(labels),train_percentage)
+        save_split_indices(dataset=dataset, root=root, train_idx=train, val_idx=val, test_idx=test)
+
+    #将读取的数据都转换成tensor
+    labels = th.LongTensor(labels)
+    train = th.LongTensor(train)
+    val = th.LongTensor(val)
+    test = th.LongTensor(test)
+
+    print('labels的类别数量',nclass)
+    print('标签节点个数',len(labels))
+    print('训练集的形状依次是：',train.shape, val.shape, test.shape) #是：torch.Size([140]）torch.Size([500]）torch.Size([1000])
+
+    return g, features, features.shape[1], nclass, labels, train, val, test,num_train_nodes
+
+def preprocess_fb(root,dataset,attack,ptb_rate,train_percentage=0):
+    '''
+    fb中存在标签数量为1的
+    :param root:
+    :param dataset:
+    :param attack:
+    :param ptb_rate:
+    :param train_percentage:
+    :return:
+    '''
+    #1.加载邻接矩阵并创建dgl图
+    print('在facebook中')
+    g = load_adj(root,dataset,attack,ptb_rate)
+    print(f'加载的节点个数{g.number_of_nodes()}')
+    valid_node_ids = sorted(g.nodes())  # 实际存在的节点编号
+    #2.加载节点特征
+    full_features = load_features(root,dataset,valid_node_ids=valid_node_ids)
+    #3.加载节点标签数据,索引是节点id,值是
+    full_labels = load_labels(root,dataset,g.num_nodes())
+    nclass = len(set(full_labels.tolist()))
+    label_counts = Counter(full_labels.tolist())
+    valid_labels = {label for label, count in label_counts.items() if count > 1}
+    valid_indices = [i for i, l in enumerate(full_labels.tolist()) if l in valid_labels]
+
+    print(f'有效节点数{len(valid_indices)}')
+    if len(valid_indices) == 0:
+        raise ValueError("所有标签类别都只出现了一次，数据为空，无法进行训练！")
+    if len(valid_indices) < len(full_labels):
+        print(f'检测到部分类别仅出现一次，已剔除 {len(full_labels) - len(valid_indices)} 个节点')
+        valid_idx_tensor = th.tensor(valid_indices, dtype=th.long)
+        features = full_features[valid_idx_tensor]
+        labels = full_labels[valid_idx_tensor]
+        # 构建对应子图（DGL 会自动重编号）
+        g = dgl.node_subgraph(g, valid_idx_tensor)
+
+    # 1. 子图中的节点编号是 0~len(valid_indices)-1
+    subgraph_ids = th.arange(len(valid_idx_tensor))  # 子图的节点编号
+
+    # 2. 子图中每个节点对应原图中的节点编号
+    original_ids = g.ndata[dgl.NID]
+
+    # 3. 验证 features 和 labels 是从原图中按 valid_idx_tensor 采样得到的
+    #    对于每一个子图节点 i，检查它的特征和标签是否等于原图中 original_ids[i] 的
+    for i in range(len(original_ids)):
+        orig_id = original_ids[i].item()
+        assert th.equal(features[i], full_features[orig_id]), f"features mismatch at node {i}"
+        assert labels[i].item() == full_labels[orig_id].item(), f"label mismatch at node {i}"
+
+    print("✅ 特征和标签与子图编号一一对应，验证通过！")
+    # 4.计算类别数
+    nclass = len(set(labels.tolist()))
+
+    #4.加载训练集、验证集和测试集  如果输入的是0，则是读取默认的。
+    load_default_split = train_percentage<=0
+    load_dir = f'{root}/{dataset}/gsr/'
+    if os.path.isfile(f'{load_dir}/{dataset}.train') and load_default_split: #要求读取默认的，并且确实已经生成了默认的
+        train = np.loadtxt(f'{load_dir}/{dataset}.train', dtype=int)
+        val = np.loadtxt(f'{load_dir}/{dataset}/{dataset}.val', dtype=int)
+        test = np.loadtxt(f'{load_dir}/{dataset}/{dataset}.test', dtype=int)
+    else:#重新生成训练集、、、
+        print('正在重新生成训练集')
+        if th.is_tensor(labels):
+            labels = labels.numpy()
+        train,val,test,num_train_nodes =  stratified_train_test_split_fb(np.arange(len(labels)), labels, len(labels),train_percentage)
         save_split_indices(dataset=dataset, root=root, train_idx=train, val_idx=val, test_idx=test)
 
     #将读取的数据都转换成tensor

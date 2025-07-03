@@ -274,7 +274,7 @@ def load_graph(root,dataset,attack,ptb_rate=None,type=None):
             graphx = citation_graph_reader(root, dataset)  # 读取图 nx格式的
             print(graphx)
             n_nodes = graphx.number_of_nodes()
-        elif dataset in ['cocs','photo']:
+        elif dataset in ['cocs','photo','dblp','amazon','cocs']:
             graphx = nx.Graph()
             with open(f'{root}/{dataset}/{dataset}.edges', "r") as f:
                 for line in f:
@@ -283,21 +283,48 @@ def load_graph(root,dataset,attack,ptb_rate=None,type=None):
             print(f'{dataset}:', graphx)
             n_nodes = graphx.number_of_nodes()
         elif dataset in ['facebook','fb107','wfb107']:  #fbxxx的邻接矩阵
-            print('加载facebook数据集图')
-            # graphx = ego_utils.ego_graph_reader(root, dataset)
-            # graph_path = f'{args.root}/{args.dataset}/{args.dataset[2:]}.edges'
-            # graphx = efacebook_utils.read_edge_file(graph_path)
             graphx = nx.read_edgelist(f'{root}/{dataset}/{dataset}.edges', nodetype=int, data=False)
             print(graphx)
             n_nodes = graphx.number_of_nodes()
-        elif dataset in ['cora_stb','cora_gsr','fb107_stb','fb107_gsr']:
+        elif dataset in ['cora_stb','cora_gsr','fb107_stb','fb107_gsr','photo_stb','photo_gsr','facebook_gsr','dblp_gsr','dblp_stb','citeseer_gsr','citeseer_stb','amazon_gsr','amazon_stb','cocs_gsr','cocs_stb']:
             path = os.path.join(root, dataset, attack,f'{dataset}_raw.npz')
             print(f'加载图路径：{path}')
             adj_csr_matrix = sp.load_npz(path)
             graphx = nx.from_scipy_sparse_array(adj_csr_matrix)
             print(graphx)
             n_nodes = graphx.number_of_nodes()
-    elif attack in ['add','random_remove','gaddm','del','random_add','gdelm','random_flip','gflipm','cdelm','cflipm','delm','flipm']:
+        elif dataset in ['football']:
+            path = root + dataset + '/' + dataset + '.txt'
+            max = 0
+            edges = []
+            for line in open(path, encoding='utf-8'):
+                node1, node2 = line.split(" ")
+                node1_ = int(node1)
+                node2_ = int(node2)
+                if node1_ == node2_:
+                    continue
+                if max < node1_:
+                    max = node1_
+                if max < node2_:
+                    max = node2_
+                edges.append([node1_, node2_])
+            n_nodes = max + 1
+            nodeslists = [x for x in range(n_nodes)]
+            graphx = nx.Graph()  # 学一下怎么用的。
+            graphx.add_nodes_from(nodeslists)
+            graphx.add_edges_from(edges)
+            print(graphx)
+            n_nodes = graphx.number_of_nodes()
+            del edges
+        # elif dataset in ['dblp']: #我已经将这个处理成.edges的格式了
+        #     # 加载图的变数据
+        #     path = os.path.join(root,dataset,dataset,'edges.npy')
+        #     print(f'加载图路径：{path}')
+        #     new_edge = np.load(path).tolist()
+        #     graphx = nx.from_edgelist(new_edge)
+        #     print(graphx)
+        #     n_nodes = graphx.number_of_nodes()
+    elif attack in ['add','random_remove','gaddm','del','random_add','gdelm','random_flip','gflipm','cdelm','cflipm','delm','flipm','meta']:
         path = os.path.join(root, dataset, attack,
                             f'{dataset}_{attack}_{ptb_rate}.npz')
         print(f'加载图路径：{path}')
@@ -354,7 +381,7 @@ def tongji(root,dataset,attack='none',ptb_rate=None,type=None):
             graphx = nx.read_edgelist(f'{root}/{dataset}/{dataset}.edges', nodetype=int, data=False)
             print(graphx)
             n_nodes = graphx.number_of_nodes()
-        elif dataset in ['cora_stb','cora_gsr']:
+        elif dataset in ['cora_stb','cora_gsr','citseer_gsr','citeseer_stb']:
             path = os.path.join(root, dataset, attack,f'{dataset}_raw.npz')
             print(f'加载图路径：{path}')
             adj_csr_matrix = sp.load_npz(path)
@@ -382,11 +409,11 @@ def tongji(root,dataset,attack='none',ptb_rate=None,type=None):
     print(f"节点数: {graphx.number_of_nodes()}, 边数: {graphx.number_of_edges()}")
 
     #!!加载节点特征
-    if dataset in ['cora','citeseer_stb','pubmed','citeseer']:
+    if dataset in ['cora','pubmed','citeseer']:
         nodes_feats = citation_feature_reader(root, dataset)  # numpy.ndaaray:(2708,1433)
         nodes_feats = torch.from_numpy(nodes_feats)  # 转换成tensor
         node_in_dim = nodes_feats.shape[1]
-    elif dataset in ['cora_stb','cora_gsr']:
+    elif dataset in ['cora_stb','cora_gsr','citesser_stb','citeseer_gsr']:
         nodes_feats = citation_feature_reader(root, dataset[:-4])  # numpy.ndaaray:(2708,1433)
         nodes_feats = torch.from_numpy(nodes_feats)  # 转换成tensor
         node_in_dim = nodes_feats.shape[1]
@@ -396,7 +423,7 @@ def tongji(root,dataset,attack='none',ptb_rate=None,type=None):
         # nodes_feats = fnormalize(feats_array)  # 将特征进行归一化
         nodes_feats = torch.from_numpy(feats_array)
         node_in_dim = nodes_feats.shape[1]
-    elif dataset in ['cocs']:
+    elif dataset in ['cocs','photo']:
         with open(f'{root}/{dataset}/{dataset}.feats', "r") as f:
             # 每行特征转换为列表，然后堆叠为 ndarray,注意要是float32
             nodes_feats = np.array([list(map(float, line.strip().split())) for line in f],dtype=np.float32)
@@ -432,5 +459,5 @@ def tongji(root,dataset,attack='none',ptb_rate=None,type=None):
 
 if __name__ == '__main__':
     root = '../data'
-    dataset = 'cocs' #facebook,cocs,fb107
+    dataset = 'photo' #facebook,cocs,fb107
     tongji(root, dataset)
